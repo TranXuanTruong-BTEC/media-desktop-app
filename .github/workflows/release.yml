@@ -50,10 +50,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload .exe lên GitHub Release
+      - name: Upload .exe và metadata (latest.yml) lên GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
-          fail_on_unmatched_files: true
+          files: |
+            release/*.exe
+            release/*.yml
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

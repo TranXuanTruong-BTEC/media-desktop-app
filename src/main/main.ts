@@ -353,19 +353,18 @@ function setupAutoUpdater(): void {
   });
 
   autoUpdater.on("error", (err) => {
+    // Không hiển thị lỗi chi tiết cho user (404, app.yml, v.v.)
     const payload: UpdateStatusPayload = {
       state: "error",
-      message: `Lỗi auto-update: ${err.message}`,
+      message: "Không thể kiểm tra cập nhật.",
     };
     sendToRenderer("update:status", payload);
   });
 
-  void autoUpdater.checkForUpdates().catch((err: unknown) => {
-    const message =
-      err instanceof Error ? err.message : "Không kiểm tra được bản cập nhật.";
+  void autoUpdater.checkForUpdates().catch(() => {
     const payload: UpdateStatusPayload = {
       state: "error",
-      message,
+      message: "Không thể kiểm tra cập nhật.",
     };
     sendToRenderer("update:status", payload);
   });
