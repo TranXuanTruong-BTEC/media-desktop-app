@@ -37,9 +37,15 @@ interface UpdateStatusPayload {
   version?: string;
 }
 
+interface AppInfo {
+  version: string;
+}
+
 const api = {
   download: (options: DownloadOptions): Promise<string> =>
     ipcRenderer.invoke("download", options),
+
+  getAppInfo: (): Promise<AppInfo> => ipcRenderer.invoke("app:get-info"),
 
   onProgress: (callback: (payload: DownloadProgressPayload) => void): (() => void) => {
     const listener = (_: unknown, payload: DownloadProgressPayload) => {

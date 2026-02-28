@@ -45,6 +45,7 @@ declare global {
       onStatus: (callback: (payload: DownloadStatusPayload) => void) => () => void;
       onUpdateStatus?: (callback: (payload: UpdateStatusPayload) => void) => () => void;
       selectFolder: () => Promise<string | null>;
+      getAppInfo: () => Promise<{ version: string }>;
     };
   }
 }
@@ -135,6 +136,7 @@ function App() {
   const [currentTitle, setCurrentTitle] = useState<string | null>(null);
 
   const [updateMessage, setUpdateMessage] = useState<string>("");
+  const [appVersion, setAppVersion] = useState<string | null>(null);
 
   const isElectron = typeof window !== "undefined" && !!window.media;
 
@@ -161,6 +163,16 @@ function App() {
       window.media.onUpdateStatus?.((payload) => {
         setUpdateMessage(payload.message ?? "");
       }) ?? null;
+
+    // Lấy version app từ main process
+    void window.media
+      .getAppInfo()
+      .then((info) => {
+        setAppVersion(info.version);
+      })
+      .catch(() => {
+        setAppVersion(null);
+      });
 
     return () => {
       offProgress();
@@ -229,9 +241,13 @@ function App() {
         <div className="bg-white/90 border border-white/70 rounded-3xl shadow-2xl shadow-slate-400/40 px-7 py-6 space-y-5 backdrop-blur">
           <header className="space-y-1">
             <h1 className="text-xl font-semibold text-slate-900">Media Downloader</h1>
-            <p className="text-xs text-slate-500">
-              Tải video và audio từ YouTube về máy tính Windows của bạn.
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+              <span>
+                Version {appVersion ?? "dev"}{" "}
+                {process.env.NODE_ENV !== "production" ? "(dev)" : ""}
+              </span>
+              {updateMessage && <span className="text-right">{updateMessage}</span>}
+            </div>
           </header>
 
           <div className="space-y-3">
@@ -364,11 +380,7 @@ function App() {
             </div>
           )}
 
-          {updateMessage && (
-            <div className="pt-1 text-[10px] text-right text-slate-400">
-              {updateMessage}
-            </div>
-          )}
+          {/* updateMessage đã hiển thị ở header cùng với version */}
         </div>
       </div>
     </div>

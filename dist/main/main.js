@@ -118,6 +118,12 @@ function buildYtDlpArgs(options) {
     return { executable: ytDlpPath, args };
 }
 function registerIpcHandlers() {
+    // Thông tin app cho renderer (version, v.v.)
+    ipcMain.handle("app:get-info", async () => {
+        return {
+            version: app.getVersion(),
+        };
+    });
     // Chọn thư mục lưu file
     ipcMain.handle("select-folder", async () => {
         if (!mainWindow)
