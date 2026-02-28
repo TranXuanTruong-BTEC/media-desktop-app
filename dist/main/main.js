@@ -250,7 +250,7 @@ function setupAutoUpdater() {
     autoUpdater.on("update-not-available", () => {
         const payload = {
             state: "not-available",
-            message: "Bạn đang dùng phiên bản mới nhất.",
+            message: "Phiên bản mới nhất.",
         };
         sendToRenderer("update:status", payload);
     });
