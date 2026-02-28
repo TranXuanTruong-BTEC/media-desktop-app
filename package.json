@@ -1,27 +1,69 @@
 {
   "name": "media-desktop-app",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "vite",
     "build:renderer": "vite build",
-    "build:main": "tsc -p tsconfig.main.json",
+    "build:main": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && node scripts/rename-preload.cjs",
     "electron": "npm run build:main && electron .",
-    "build": "npm run build:renderer && npm run build:main"
+    "build": "npm run build:renderer && npm run build:main",
+    "dist": "npm run build && electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "electron-updater": "^6.1.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.27",
     "electron": "^30.0.0",
+    "electron-builder": "^25.0.5",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.2.1",
     "typescript": "^5.4.5",
     "vite": "^5.2.10"
+  },
+  "build": {
+    "appId": "com.example.media-desktop-app",
+    "productName": "Media Desktop App",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "tools/",
+        "to": "tools",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "your-github-username",
+        "repo": "media-desktop-app"
+      }
+    ]
   }
 }

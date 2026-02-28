@@ -1,3 +1,6 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Tuỳ chỉnh nhỏ cho body để giống desktop app hơn */
+body {
+  @apply antialiased bg-slate-900 text-slate-100;
+}
