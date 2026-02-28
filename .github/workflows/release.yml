@@ -7,7 +7,7 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:  # Cho phép chạy thủ công
+  workflow_dispatch:
 
 jobs:
   release:
@@ -45,7 +45,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build và publish lên GitHub Releases
-        run: npm run build; npx electron-builder --win --publish always
+      - name: Build app (không publish qua electron-builder)
+        run: npm run build; npx electron-builder --win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload .exe lên GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
