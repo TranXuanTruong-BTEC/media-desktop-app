@@ -46,6 +46,8 @@ declare global {
       onUpdateStatus?: (callback: (payload: UpdateStatusPayload) => void) => () => void;
       selectFolder: () => Promise<string | null>;
       getAppInfo: () => Promise<{ version: string }>;
+      checkForUpdates?: () => Promise<void>;
+      restartAndInstall?: () => Promise<void>;
     };
   }
 }
@@ -138,6 +140,7 @@ function App() {
   const [currentTitle, setCurrentTitle] = useState<string | null>(null);
 
   const [updateMessage, setUpdateMessage] = useState<string>("");
+  const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   const isElectron = typeof window !== "undefined" && !!window.media;
@@ -163,6 +166,7 @@ function App() {
 
     const offUpdate =
       window.media.onUpdateStatus?.((payload) => {
+        setUpdateState(payload.state);
         setUpdateMessage(payload.message ?? "");
       }) ?? null;
 
@@ -248,7 +252,27 @@ function App() {
                 Version {appVersion ?? "dev"}{" "}
                 {process.env.NODE_ENV !== "production" ? "(dev)" : ""}
               </span>
-              {updateMessage && <span className="text-right">{updateMessage}</span>}
+              <span className="flex items-center gap-2">
+                {updateState === "downloaded" ? (
+                  <button
+                    type="button"
+                    onClick={() => window.media?.restartAndInstall?.()}
+                    className="px-2 py-1 rounded bg-emerald-500 text-white font-medium hover:bg-emerald-600"
+                  >
+                    Khởi động lại để cập nhật
+                  </button>
+                ) : updateMessage ? (
+                  <span className="text-right">{updateMessage}</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => window.media?.checkForUpdates?.()}
+                    className="text-sky-500 hover:underline"
+                  >
+                    Kiểm tra cập nhật
+                  </button>
+                )}
+              </span>
             </div>
           </header>
 
@@ -353,8 +377,26 @@ function App() {
 
           {(isDownloading || currentTitle) && (
             <div className="mt-2 rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center gap-3">
-              <div className="h-9 w-9 rounded-xl bg-slate-200 flex items-center justify-center">
-                <span className="h-4 w-4 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
+              <div
+                className={`h-9 w-9 rounded-xl flex items-center justify-center ${
+                  downloadStatus === "completed"
+                    ? "bg-emerald-100"
+                    : downloadStatus === "error"
+                      ? "bg-rose-100"
+                      : "bg-slate-200"
+                }`}
+              >
+                {downloadStatus === "completed" ? (
+                  <svg className="h-5 w-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : downloadStatus === "error" ? (
+                  <svg className="h-5 w-5 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                ) : (
+                  <span className="h-4 w-4 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
+                )}
               </div>
               <div className="flex-1 space-y-1">
                 <div className="flex justify-between items-center">

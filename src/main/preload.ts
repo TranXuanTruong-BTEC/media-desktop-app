@@ -78,6 +78,9 @@ const api = {
   },
 
   selectFolder: (): Promise<string | null> => ipcRenderer.invoke("select-folder"),
+
+  checkForUpdates: (): Promise<void> => ipcRenderer.invoke("update:check"),
+  restartAndInstall: (): Promise<void> => ipcRenderer.invoke("update:restart-and-install"),
 };
 
 contextBridge.exposeInMainWorld("media", api);

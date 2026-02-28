@@ -370,9 +370,21 @@ function setupAutoUpdater(): void {
   });
 }
 
+function registerUpdateHandlers(): void {
+  ipcMain.handle("update:check", () => {
+    if (isDev) return;
+    void autoUpdater.checkForUpdates().catch(() => {});
+  });
+
+  ipcMain.handle("update:restart-and-install", () => {
+    autoUpdater.quitAndInstall(false, true);
+  });
+}
+
 app.whenReady().then(() => {
   createWindow();
   registerIpcHandlers();
+  registerUpdateHandlers();
   setupAutoUpdater();
 
   app.on("activate", () => {
