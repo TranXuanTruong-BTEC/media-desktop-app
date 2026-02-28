@@ -62,6 +62,23 @@ npx electron .
 - `src/renderer/` — giao diện React (Vite)
 - `dist/` — output build (main + renderer)
 
+## Tải app cho người dùng (GitHub Releases)
+
+User có thể tải file `.exe` từ [GitHub Releases](https://github.com/TranXuanTruong-BTEC/media-desktop-app/releases/latest).
+
+**Để tạo bản Release mới:**
+
+1. Cập nhật `version` trong `package.json` (ví dụ: `1.0.1`)
+2. Commit và push code
+3. Tạo tag và push:
+   ```bash
+   git tag v1.0.1
+   git push origin v1.0.1
+   ```
+4. GitHub Actions sẽ tự build và publish lên Releases (kèm yt-dlp + ffmpeg)
+
+Hoặc vào **Actions → Release → Run workflow** để build thủ công.
+
 ## Scripts
 
 | Script | Mô tả |
@@ -70,4 +87,5 @@ npx electron .
 | `npm run build:main` | Build process chính Electron |
 | `npm run build:renderer` | Build giao diện (Vite) |
 | `npm run build` | Build cả main và renderer |
+| `npm run dist` | Build full + tạo file .exe (cần có thư mục `tools/` với yt-dlp.exe, ffmpeg.exe) |
 | `npx electron .` | Chạy app Electron (sau khi build main hoặc build full) |

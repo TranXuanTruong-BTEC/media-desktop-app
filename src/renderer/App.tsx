@@ -57,8 +57,9 @@ const QUALITIES: { value: DownloadQuality; label: string }[] = [
 ];
 
 function LandingPage() {
+  // Link tải trực tiếp file .exe (artifactName cố định trong package.json)
   const downloadUrl =
-    "https://github.com/your-github-username/media-desktop-app/releases/latest";
+    "https://github.com/TranXuanTruong-BTEC/media-desktop-app/releases/latest/download/MediaDesktopApp-Setup.exe";
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4">
@@ -80,6 +81,7 @@ function LandingPage() {
           <div className="flex flex-wrap items-center gap-3">
             <a
               href={downloadUrl}
+              download="MediaDesktopApp-Setup.exe"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-sm font-semibold shadow-lg shadow-emerald-500/30 transition"

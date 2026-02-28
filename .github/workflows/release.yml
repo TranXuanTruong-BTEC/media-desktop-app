@@ -1,0 +1,51 @@
+# Build và publish Media Desktop App lên GitHub Releases
+# Cách dùng: push tag v1.0.0 (hoặc bất kỳ v*) để tạo Release tự động
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # Cho phép chạy thủ công
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Tạo thư mục tools và tải yt-dlp
+        run: |
+          New-Item -ItemType Directory -Force -Path tools
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "tools/yt-dlp.exe" -UseBasicParsing
+        shell: pwsh
+
+      - name: Tải ffmpeg
+        run: |
+          $ffmpegZip = "ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $ffmpegZip -UseBasicParsing
+          Expand-Archive -Path $ffmpegZip -DestinationPath ffmpeg_extract -Force
+          $ffmpegExe = Get-ChildItem -Path ffmpeg_extract -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          Copy-Item $ffmpegExe.FullName -Destination "tools/ffmpeg.exe"
+          Remove-Item $ffmpegZip -Force
+          Remove-Item -Recurse -Force ffmpeg_extract
+        shell: pwsh
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build và publish lên GitHub Releases
+        run: npm run build; npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
