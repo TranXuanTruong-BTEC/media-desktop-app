@@ -118,8 +118,9 @@ function LandingPage() {
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
             </div>
             <div className="h-40 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center text-xs text-slate-400 text-center px-4">
-              Giao diện downloader với ô nhập link, chọn định dạng, chất lượng và tiến trình tải
-              theo thời gian thực — chỉ khả dụng trong app desktop.
+              - Giao diện downloader với ô nhập link, chọn định dạng, chất lượng và tiến trình tải
+                theo thời gian thực — chỉ khả dụng trong app desktop.
+              - Bản Website (conmming soon) sẽ có giao diện đơn giản hơn, chỉ hỗ trợ nhập link và tải về định dạng MP4/MP3 chất lượng tốt nhất, không có tuỳ chọn nâng cao hay hiển thị tiến trình chi tiết.
             </div>
           </div>
         </div>
