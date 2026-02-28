@@ -271,24 +271,35 @@ function setupAutoUpdater() {
         sendToRenderer("update:status", payload);
     });
     autoUpdater.on("error", (err) => {
+        // Không hiển thị lỗi chi tiết cho user (404, app.yml, v.v.)
         const payload = {
             state: "error",
-            message: `Lỗi auto-update: ${err.message}`,
+            message: "Không thể kiểm tra cập nhật.",
         };
         sendToRenderer("update:status", payload);
     });
-    void autoUpdater.checkForUpdates().catch((err) => {
-        const message = err instanceof Error ? err.message : "Không kiểm tra được bản cập nhật.";
+    void autoUpdater.checkForUpdates().catch(() => {
         const payload = {
             state: "error",
-            message,
+            message: "Không thể kiểm tra cập nhật.",
         };
         sendToRenderer("update:status", payload);
+    });
+}
+function registerUpdateHandlers() {
+    ipcMain.handle("update:check", () => {
+        if (isDev)
+            return;
+        void autoUpdater.checkForUpdates().catch(() => { });
+    });
+    ipcMain.handle("update:restart-and-install", () => {
+        autoUpdater.quitAndInstall(false, true);
     });
 }
 app.whenReady().then(() => {
     createWindow();
     registerIpcHandlers();
+    registerUpdateHandlers();
     setupAutoUpdater();
     app.on("activate", () => {
         if (BrowserWindow.getAllWindows().length === 0) {
