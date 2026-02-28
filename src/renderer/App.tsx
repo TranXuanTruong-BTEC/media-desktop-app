@@ -64,68 +64,94 @@ function LandingPage() {
     "https://github.com/TranXuanTruong-BTEC/media-desktop-app/releases/latest/download/MediaDesktopApp-Setup.exe";
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4">
-      <div className="max-w-4xl w-full mx-auto grid gap-10 md:grid-cols-[1.4fr,1fr] items-center">
-        <div className="space-y-6">
-          <p className="text-xs tracking-[0.25em] uppercase text-emerald-400">
-            Desktop Media Downloader
-          </p>
-          <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
-            Tải video & audio từ YouTube
-            <br />
-            nhanh chóng, an toàn, không quảng cáo.
-          </h1>
-          <p className="text-sm md:text-base text-slate-400">
-            Media Desktop App là ứng dụng desktop (Electron + React) giúp bạn tải MP4 / MP3 từ
-            YouTube và nhiều nguồn khác. Hỗ trợ chọn chất lượng, xem tiến trình, dùng trực tiếp
-            yt-dlp + ffmpeg ngay trên Windows.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <a
-              href={downloadUrl}
-              download="MediaDesktopApp-Setup.exe"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-sm font-semibold shadow-lg shadow-emerald-500/30 transition"
-            >
-              Tải cho Windows (.exe)
-            </a>
-            <div className="text-xs text-slate-500">
-              Chỉ hỗ trợ Windows. Cài đặt xong mở app để sử dụng đầy đủ tính năng downloader.
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-4 text-xs text-slate-500">
-            <span className="inline-flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Không quảng cáo
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Dùng yt-dlp + ffmpeg local
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Auto-update qua GitHub Releases
-            </span>
-          </div>
+<div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4">
+  <div className="max-w-4xl w-full mx-auto grid gap-10 md:grid-cols-[1.4fr,1fr] items-center">
+    {/* LEFT */}
+    <div className="space-y-6">
+      <p className="text-xs tracking-[0.25em] uppercase text-emerald-400">
+        Tool & App Platform
+      </p>
+
+      <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
+        Nền tảng tool & app desktop
+        <br />
+        nhanh gọn, riêng tư, tập trung hiệu suất.
+      </h1>
+
+      <p className="text-sm md:text-base text-slate-400">
+        Đây là website giới thiệu các <b>tool & ứng dụng desktop</b> do mình phát triển.
+        Hiện tại nền tảng mới có <b>01 ứng dụng đầu tiên</b>, nhưng trong tương lai sẽ
+        mở rộng thêm nhiều chức năng khác như media, automation, tiện ích hệ thống và AI hỗ trợ công việc.
+      </p>
+
+      {/* CURRENT APP */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-2">
+        <p className="text-sm font-semibold text-emerald-400">
+          Ứng dụng hiện có
+        </p>
+        <p className="text-sm text-slate-300">
+          <b>Media Desktop App</b> – Ứng dụng tải video & audio từ YouTube và nhiều nguồn khác.
+          Hoạt động hoàn toàn local, không quảng cáo, không theo dõi.
+        </p>
+      </div>
+
+      {/* CTA */}
+      <div className="flex flex-wrap items-center gap-3">
+        <a
+          href={downloadUrl}
+          download="MediaDesktopApp-Setup.exe"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-sm font-semibold shadow-lg shadow-emerald-500/30 transition"
+        >
+          Tải app hiện tại (Windows)
+        </a>
+
+        <div className="text-xs text-slate-500">
+          App desktop • Windows • Cài đặt một lần, dùng lâu dài
+        </div>
+      </div>
+
+      {/* FEATURES */}
+      <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+        <span className="inline-flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          Không quảng cáo
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          Chạy hoàn toàn local
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          Mở rộng thêm nhiều tool trong tương lai
+        </span>
+      </div>
+    </div>
+
+    {/* RIGHT */}
+    <div className="hidden md:block">
+      <div className="relative rounded-2xl border border-slate-800 bg-slate-950/60 p-4 shadow-xl shadow-black/60">
+        <div className="flex items-center gap-1 mb-3">
+          <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
+          <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+          <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
         </div>
 
-        <div className="hidden md:block">
-          <div className="relative rounded-2xl border border-slate-800 bg-slate-950/60 p-4 shadow-xl shadow-black/60">
-            <div className="flex items-center gap-1 mb-3">
-              <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-              <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+        <div className="h-40 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center text-xs text-slate-400 text-center px-4">
+          <div className="space-y-2">
+            <div>
+              - App desktop: giao diện đầy đủ, nhiều tuỳ chọn, hiển thị tiến trình theo thời gian thực.
             </div>
-            <div className="h-40 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center text-xs text-slate-400 text-center px-4">
-              - Giao diện downloader với ô nhập link, chọn định dạng, chất lượng và tiến trình tải
-                theo thời gian thực — chỉ khả dụng trong app desktop.
-              - Bản Website (conmming soon) sẽ có giao diện đơn giản hơn, chỉ hỗ trợ nhập link và tải về định dạng MP4/MP3 chất lượng tốt nhất, không có tuỳ chọn nâng cao hay hiển thị tiến trình chi tiết.
+            <div>
+              - Website: trang giới thiệu & tải app. Phiên bản web tool đơn giản sẽ ra mắt sau (coming soon).
             </div>
           </div>
         </div>
       </div>
     </div>
+  </div>
+</div>
   );
 }
 
