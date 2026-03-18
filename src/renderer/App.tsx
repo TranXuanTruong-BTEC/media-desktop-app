@@ -8,6 +8,8 @@ interface DownloadOptions {
   format: DownloadFormat;
   quality: DownloadQuality;
   outputDir?: string;
+  cookiesFilePath?: string;
+  cookiesFromBrowser?: "chrome" | "edge";
 }
 
 type DownloadStatus = "idle" | "queued" | "downloading" | "completed" | "error";
@@ -45,7 +47,14 @@ declare global {
       onStatus: (callback: (payload: DownloadStatusPayload) => void) => () => void;
       onUpdateStatus?: (callback: (payload: UpdateStatusPayload) => void) => () => void;
       selectFolder: () => Promise<string | null>;
-      getAppInfo: () => Promise<{ version: string }>;
+      selectFile?: (options?: {
+        title?: string;
+        filters?: { name: string; extensions: string[] }[];
+      }) => Promise<string | null>;
+      closeBrowsers?: () => Promise<void>;
+      openAuth?: (target: "douyin" | "tiktok") => Promise<void>;
+      updateYtDlpDev?: () => Promise<{ path: string; version: string | null }>;
+      getAppInfo: () => Promise<{ version: string; isDev: boolean; ytDlpVersion: string | null }>;
       checkForUpdates?: () => Promise<void>;
       restartAndInstall?: () => Promise<void>;
     };
@@ -57,103 +66,6 @@ const QUALITIES: { value: DownloadQuality; label: string }[] = [
   { value: "720p", label: "720p" },
   { value: "1080p", label: "1080p" },
 ];
-
-function LandingPage() {
-  // Link tải trực tiếp — bấm là tải file .exe ngay, không chuyển trang
-  const downloadUrl =
-    "https://github.com/TranXuanTruong-BTEC/media-desktop-app/releases/latest/download/MediaDesktopApp-Setup.exe";
-
-  return (
-<div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4">
-  <div className="max-w-4xl w-full mx-auto grid gap-10 md:grid-cols-[1.4fr,1fr] items-center">
-    {/* LEFT */}
-    <div className="space-y-6">
-      <p className="text-xs tracking-[0.25em] uppercase text-emerald-400">
-        Tool & App Platform
-      </p>
-
-      <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
-        Nền tảng tool & app desktop
-        <br />
-        nhanh gọn, riêng tư, tập trung hiệu suất.
-      </h1>
-
-      <p className="text-sm md:text-base text-slate-400">
-        Đây là website giới thiệu các <b>tool & ứng dụng desktop</b> do mình phát triển.
-        Hiện tại nền tảng mới có <b>01 ứng dụng đầu tiên</b>, nhưng trong tương lai sẽ
-        mở rộng thêm nhiều chức năng khác như media, automation, tiện ích hệ thống và AI hỗ trợ công việc.
-      </p>
-
-      {/* CURRENT APP */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-2">
-        <p className="text-sm font-semibold text-emerald-400">
-          Ứng dụng hiện có
-        </p>
-        <p className="text-sm text-slate-300">
-          <b>Media Desktop App</b> – Ứng dụng tải video & audio từ YouTube và nhiều nguồn khác.
-          Hoạt động hoàn toàn local, không quảng cáo, không theo dõi.
-        </p>
-      </div>
-
-      {/* CTA */}
-      <div className="flex flex-wrap items-center gap-3">
-        <a
-          href={downloadUrl}
-          download="MediaDesktopApp-Setup.exe"
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-sm font-semibold shadow-lg shadow-emerald-500/30 transition"
-        >
-          Tải app hiện tại (Windows)
-        </a>
-
-        <div className="text-xs text-slate-500">
-          App desktop • Windows • Cài đặt một lần, dùng lâu dài
-        </div>
-      </div>
-
-      {/* FEATURES */}
-      <div className="flex flex-wrap gap-4 text-xs text-slate-500">
-        <span className="inline-flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          Không quảng cáo
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          Chạy hoàn toàn local
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          Mở rộng thêm nhiều tool trong tương lai
-        </span>
-      </div>
-    </div>
-
-    {/* RIGHT */}
-    <div className="hidden md:block">
-      <div className="relative rounded-2xl border border-slate-800 bg-slate-950/60 p-4 shadow-xl shadow-black/60">
-        <div className="flex items-center gap-1 mb-3">
-          <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-          <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-        </div>
-
-        <div className="h-40 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center text-xs text-slate-400 text-center px-4">
-          <div className="space-y-2">
-            <div>
-              - App desktop: giao diện đầy đủ, nhiều tuỳ chọn, hiển thị tiến trình theo thời gian thực.
-            </div>
-            <div>
-              - Website: trang giới thiệu & tải app. Phiên bản web tool đơn giản sẽ ra mắt sau (coming soon).
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-  );
-}
 
 function App() {
   const [url, setUrl] = useState("");
@@ -169,8 +81,22 @@ function App() {
   const [updateMessage, setUpdateMessage] = useState<string>("");
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [isDevMode, setIsDevMode] = useState<boolean>(false);
+  const [ytDlpVersion, setYtDlpVersion] = useState<string | null>(null);
+  const [devBusy, setDevBusy] = useState<boolean>(false);
 
-  const isElectron = typeof window !== "undefined" && !!window.media;
+  const parsedUrl = (() => {
+    try {
+      const u = new URL(url.trim());
+      const host = u.hostname.replace(/^www\./, "").toLowerCase();
+      return { url: u, host };
+    } catch {
+      return null;
+    }
+  })();
+  const currentHost = parsedUrl?.host ?? "";
+  const isDouyin = currentHost.endsWith("douyin.com");
+  const isTikTok = currentHost.endsWith("tiktok.com");
 
   useEffect(() => {
     if (!window.media) {
@@ -202,9 +128,13 @@ function App() {
       .getAppInfo()
       .then((info) => {
         setAppVersion(info.version);
+        setIsDevMode(!!info.isDev);
+        setYtDlpVersion(info.ytDlpVersion ?? null);
       })
       .catch(() => {
         setAppVersion(null);
+        setIsDevMode(false);
+        setYtDlpVersion(null);
       });
 
     return () => {
@@ -236,7 +166,28 @@ function App() {
     if (!window.media?.download) {
       setDownloadStatus("error");
       setDownloadMessage(
-        "Không kết nối được với Electron. Hãy chạy: Terminal 1: npm run dev, Terminal 2: npm run electron (không mở localhost:5173 bằng trình duyệt).",
+        "Ứng dụng này chỉ chạy dạng desktop (file .exe). Vui lòng mở bằng ứng dụng, không dùng trên trình duyệt.",
+      );
+      return;
+    }
+
+    const parsed = (() => {
+      try {
+        const u = new URL(trimmed);
+        const host = u.hostname.replace(/^www\./, "").toLowerCase();
+        return { url: u, host };
+      } catch {
+        return null;
+      }
+    })();
+
+    const host = parsed?.host ?? "";
+    const isDouyin = host.endsWith("douyin.com");
+
+    if (isDouyin) {
+      setDownloadStatus("error");
+      setDownloadMessage(
+        "Hiện tại app đang tạm đóng băng tải Douyin. Chức năng này sẽ được cập nhật sau.",
       );
       return;
     }
@@ -252,21 +203,21 @@ function App() {
         format,
         quality,
         outputDir: outputDir ?? undefined,
+        // Cookies cho Douyin/TikTok sẽ được lấy từ cửa sổ đăng nhập trong app
+        // (exportAuthCookiesForUrl ở main), nên không dùng cookies-from-browser nữa.
       });
       // Trạng thái chi tiết sẽ được cập nhật qua onStatus từ main
     } catch (error) {
       setDownloadStatus("error");
-      setDownloadMessage(
-        error instanceof Error ? error.message : "Không tải được file. Vui lòng thử lại.",
-      );
+      const raw = error instanceof Error ? error.message : "Không tải được file. Vui lòng thử lại.";
+      const cleaned = raw
+        .replace(/^Error invoking remote method 'download':\s*/i, "")
+        .replace(/^Error:\s*/i, "");
+      setDownloadMessage(cleaned);
     }
   };
 
   const isDownloading = downloadStatus === "queued" || downloadStatus === "downloading";
-
-  if (!isElectron) {
-    return <LandingPage />;
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-100 via-indigo-100 to-slate-200 flex items-center justify-center px-4 py-8 font-sans">
@@ -303,6 +254,40 @@ function App() {
             </div>
           </header>
 
+          {isDevMode && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] text-amber-900">
+                  Dev tools • yt-dlp: <span className="font-semibold">{ytDlpVersion ?? "chưa có"}</span>
+                </div>
+                <button
+                  type="button"
+                  disabled={devBusy}
+                  onClick={async () => {
+                    try {
+                      setDevBusy(true);
+                      const result = await window.media?.updateYtDlpDev?.();
+                      setYtDlpVersion(result?.version ?? null);
+                      setDownloadStatus("idle");
+                      setDownloadMessage("Đã cập nhật yt-dlp (dev). Hãy thử tải lại Douyin.");
+                    } catch (e) {
+                      setDownloadStatus("error");
+                      setDownloadMessage(e instanceof Error ? e.message : "Không cập nhật được yt-dlp.");
+                    } finally {
+                      setDevBusy(false);
+                    }
+                  }}
+                  className="px-3 py-2 rounded-xl bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {devBusy ? "Đang tải..." : "Tải yt-dlp mới nhất"}
+                </button>
+              </div>
+              <div className="mt-1 text-[11px] text-amber-800">
+                Chỉ dùng khi dev. Không hiển thị/không hoạt động ở bản phát hành chính thức.
+              </div>
+            </div>
+          )}
+
           <div className="space-y-3">
             <div className="flex flex-col gap-2">
               <label className="text-xs font-medium text-slate-600">URL</label>
@@ -323,6 +308,54 @@ function App() {
                 </button>
               </div>
             </div>
+
+            {isTikTok && (
+              <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <div className="text-[11px] text-slate-600">
+                  TikTok đôi khi bị 403 nếu chưa có cookies. Nếu lỗi 403, hãy đăng nhập TikTok ngay trong app rồi tải lại.
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await window.media?.openAuth?.("tiktok");
+                      setDownloadStatus("idle");
+                      setDownloadMessage("Đã mở cửa sổ đăng nhập TikTok. Đăng nhập xong hãy đóng cửa sổ đó và bấm Download lại.");
+                    } catch {
+                      setDownloadStatus("error");
+                      setDownloadMessage("Không mở được cửa sổ đăng nhập TikTok. Vui lòng thử lại.");
+                    }
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800"
+                >
+                  Đăng nhập TikTok
+                </button>
+              </div>
+            )}
+
+            {isDouyin && (
+              <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <div className="text-[11px] text-slate-600">
+                  Douyin có thể cần đăng nhập để tải. Nếu lỗi DPAPI, hãy đăng nhập ngay trong app.
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await window.media?.openAuth?.("douyin");
+                      setDownloadStatus("idle");
+                      setDownloadMessage("Đã mở cửa sổ đăng nhập. Đăng nhập xong hãy đóng cửa sổ đó và bấm Download lại.");
+                    } catch {
+                      setDownloadStatus("error");
+                      setDownloadMessage("Không mở được cửa sổ đăng nhập. Vui lòng thử lại.");
+                    }
+                  }}
+                  className="px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+                >
+                  Đăng nhập Douyin
+                </button>
+              </div>
+            )}
 
             <div className="h-px bg-slate-200" />
 
@@ -371,11 +404,14 @@ function App() {
                 </button>
               </div>
             </div>
+
+            {/* Cookies cho Douyin/TikTok được cấu hình tự động trong background.
+                Người dùng chỉ cần dán link và bấm Download. */}
           </div>
 
           {(progress ?? null) !== null && (
             <div className="space-y-2 pt-1">
-              <div className="flex justify-between text-[11px] text-slate-500">
+              <div className="flex justify_between text-[11px] text-slate-500">
                 <span>Downloading...</span>
                 <span>{Math.round(progress ?? 0)}%</span>
               </div>
@@ -389,17 +425,39 @@ function App() {
           )}
 
           {downloadMessage && (
-            <p
-              className={`text-[11px] px-1 ${
-                downloadStatus === "error"
-                  ? "text-rose-500"
-                  : downloadStatus === "completed"
-                    ? "text-emerald-600"
-                    : "text-slate-500"
-              }`}
-            >
-              {downloadMessage}
-            </p>
+            <div className="space-y-2">
+              <p
+                className={`text-[11px] px-1 ${
+                  downloadStatus === "error"
+                    ? "text-rose-500"
+                    : downloadStatus === "completed"
+                      ? "text-emerald-600"
+                      : "text-slate-500"
+                }`}
+              >
+                {downloadMessage}
+              </p>
+              {downloadStatus === "error" &&
+                /Không đọc được cookies từ trình duyệt/i.test(downloadMessage) && (
+                  <div className="px-1">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await window.media?.closeBrowsers?.();
+                          setDownloadStatus("idle");
+                          setDownloadMessage("Đã đóng Chrome/Edge. Bạn hãy bấm Download lại.");
+                        } catch {
+                          setDownloadMessage("Không thể đóng Chrome/Edge tự động. Hãy tự đóng rồi bấm Download lại.");
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-rose-500 text-white text-xs font-semibold hover:bg-rose-600"
+                    >
+                      Đóng Chrome/Edge
+                    </button>
+                  </div>
+                )}
+            </div>
           )}
 
           {(isDownloading || currentTitle) && (

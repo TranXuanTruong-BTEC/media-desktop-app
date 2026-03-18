@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run build:renderer && npm run electron",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && node scripts/rename-preload.cjs",
     "electron": "npm run build:main && electron .",

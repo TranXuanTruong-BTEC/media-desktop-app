@@ -8,6 +8,8 @@ interface DownloadOptions {
   format: DownloadFormat;
   quality: DownloadQuality;
   outputDir?: string;
+  cookiesFilePath?: string;
+  cookiesFromBrowser?: "chrome" | "edge";
 }
 
 type DownloadStatus = "idle" | "queued" | "downloading" | "completed" | "error";
@@ -39,6 +41,8 @@ interface UpdateStatusPayload {
 
 interface AppInfo {
   version: string;
+  isDev: boolean;
+  ytDlpVersion: string | null;
 }
 
 const api = {
@@ -78,6 +82,18 @@ const api = {
   },
 
   selectFolder: (): Promise<string | null> => ipcRenderer.invoke("select-folder"),
+
+  selectFile: (options?: {
+    title?: string;
+    filters?: { name: string; extensions: string[] }[];
+  }): Promise<string | null> => ipcRenderer.invoke("select-file", options),
+
+  closeBrowsers: (): Promise<void> => ipcRenderer.invoke("system:close-browsers"),
+
+  openAuth: (target: "douyin" | "tiktok"): Promise<void> => ipcRenderer.invoke("auth:open", target),
+
+  updateYtDlpDev: (): Promise<{ path: string; version: string | null }> =>
+    ipcRenderer.invoke("dev:yt-dlp:update"),
 
   checkForUpdates: (): Promise<void> => ipcRenderer.invoke("update:check"),
   restartAndInstall: (): Promise<void> => ipcRenderer.invoke("update:restart-and-install"),
