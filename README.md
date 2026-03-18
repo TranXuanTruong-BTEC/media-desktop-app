@@ -89,3 +89,8 @@ Hoặc vào **Actions → Release → Run workflow** để build thủ công.
 | `npm run build` | Build cả main và renderer |
 | `npm run dist` | Build full + tạo file .exe (cần có thư mục `tools/` với yt-dlp.exe, ffmpeg.exe) |
 | `npx electron .` | Chạy app Electron (sau khi build main hoặc build full) |
+| `git add .` |
+| `git commit -m "Update package.json"` |
+| `git tag v1.2.1` |
+| `git push origin main` |
+| `git push origin v1.2.1` |
