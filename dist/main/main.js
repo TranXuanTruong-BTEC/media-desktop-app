@@ -412,7 +412,7 @@ function registerIpcHandlers() {
                 let message = err.message;
                 if (err.code === "ENOENT") {
                     message =
-                        "Không tìm thấy yt-dlp hoặc ffmpeg. Đảm bảo có thư mục /tools với yt-dlp.exe và ffmpeg.exe cạnh ứng dụng.";
+                        "Không tìm thấy yt-dlp hoặc ffmpeg. Đảm bảo có thư mục với yt-dlp.exe và ffmpeg.exe cạnh ứng dụng.";
                 }
                 const errorPayload = {
                     status: "error",
@@ -434,7 +434,7 @@ function registerIpcHandlers() {
                 }
                 else {
                     let message = lastMessage ||
-                        "Tải thất bại. Vui lòng thử lại hoặc kiểm tra lại đường dẫn /tools/yt-dlp.exe và /tools/ffmpeg.exe.";
+                        "Tải thất bại.";
                     // Lỗi thường gặp khi dùng --cookies-from-browser (Chrome/Edge đang khóa DB cookies)
                     if (/Could not copy Chrome cookie database/i.test(message) ||
                         /Could not copy.*cookie database/i.test(message)) {
