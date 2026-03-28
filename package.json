@@ -1,0 +1,60 @@
+{
+  "name": "media-desktop-app",
+  "version": "2.0.0",
+  "description": "Tải video/audio từ YouTube, TikTok, Facebook và 1000+ trang",
+  "author": "TranXuanTruong-BTEC",
+  "private": true,
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"npm run build:main -- --watch\" \"wait-on dist-electron/main/main.js && npm run build:preload && electron .\"",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:preload": "tsc -p tsconfig.preload.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:renderer && npm run build:main && npm run build:preload",
+    "dist": "npm run build && electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "electron-updater": "^6.1.7",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.27",
+    "concurrently": "^8.2.2",
+    "electron": "^30.0.0",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.10",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.btec.media-desktop-app",
+    "productName": "MediaGet",
+    "directories": { "output": "release", "buildResources": "build" },
+    "files": ["dist-electron/**/*", "dist/**/*", "package.json"],
+    "extraResources": [{ "from": "tools/", "to": "tools", "filter": ["**/*"] }],
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.ico",
+      "artifactName": "MediaGet-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": [{
+      "provider": "github",
+      "owner": "TranXuanTruong-BTEC",
+      "repo": "media-desktop-app"
+    }]
+  }
+}

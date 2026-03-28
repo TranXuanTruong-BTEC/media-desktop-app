@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-electron/
+release/
+tools/yt-dlp.exe
+tools/node.exe
+.env
