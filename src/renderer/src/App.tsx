@@ -1,21 +1,27 @@
 // src/renderer/src/App.tsx
 import { useState, useEffect } from "react";
-import { useDownload } from "./hooks/useDownload";
-import { DownloadForm } from "./components/DownloadForm";
+import { useDownload }    from "./hooks/useDownload";
+import { DownloadForm }   from "./components/DownloadForm";
 import { DownloadItemRow } from "./components/DownloadItem";
-import { StatusBar } from "./components/StatusBar";
-import { Titlebar }     from "./components/Titlebar";
-import { UpdateBanner } from "./components/UpdateBanner";
-import { useUpdater }   from "./hooks/useUpdater";
-import { VideoQuality } from "../../shared/ipc-types";
+import { StatusBar }      from "./components/StatusBar";
+import { Titlebar }       from "./components/Titlebar";
+import { UpdateDialog }   from "./components/UpdateDialog";
+import { useUpdater }     from "./hooks/useUpdater";
+import { VideoQuality }   from "../../shared/ipc-types";
 
 export default function App() {
-  const [outputDir, setOutputDir] = useState("");
-  const { items, addDownload, cancelDownload, removeItem, clearCompleted, selectOutputDir, stats } = useDownload(outputDir);
+  const [outputDir, setOutputDir]   = useState("");
+  const [appVersion, setAppVersion] = useState("");
+
+  const { items, addDownload, cancelDownload, removeItem, clearCompleted, selectOutputDir, stats } =
+    useDownload(outputDir);
   const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
 
   useEffect(() => {
     window.api?.getDefaultDir?.().then(d => { if (d) setOutputDir(d); }).catch(() => {});
+    (window as any).api?.getAppVersion?.().then((v: string) => { if (v) setAppVersion(v); }).catch(() => {});
+    // Tự động check update sau 2s khi mở app
+    setTimeout(() => { (window as any).api?.checkForUpdate?.(); }, 2000);
   }, []);
 
   async function handleSelectDir() {
@@ -29,17 +35,13 @@ export default function App() {
 
   function handleOpenFolder(id: string) {
     const item = items.find(i => i.id === id);
-    if (item) {
-      (window as any).api?.openPath?.(item.outputDir);
-    }
+    if (item) (window as any).api?.openPath?.(item.outputDir);
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[#0f1117] text-text overflow-hidden">
-      {/* Title bar */}
+    <div className="relative flex flex-col h-screen bg-[#0f1117] text-text overflow-hidden">
       <Titlebar activeCount={stats.active} />
 
-      {/* Add download form */}
       <DownloadForm
         outputDir={outputDir}
         onOutputDirChange={setOutputDir}
@@ -47,7 +49,6 @@ export default function App() {
         onSubmit={handleSubmit}
       />
 
-      {/* Download list */}
       <div className="flex-1 overflow-y-auto">
         {items.length === 0 ? (
           <Empty />
@@ -64,21 +65,22 @@ export default function App() {
         )}
       </div>
 
-      {/* Update banner — above status bar */}
-      <UpdateBanner
-        state={updaterState}
-        onDownload={downloadNow}
-        onInstall={installNow}
-        onDismiss={dismiss}
-      />
-
-      {/* Status bar */}
       <StatusBar
         total={stats.total}
         active={stats.active}
         done={stats.done}
         failed={stats.failed}
+        version={appVersion}
         onClearCompleted={clearCompleted}
+      />
+
+      {/* Dialog overlay khi có bản cập nhật */}
+      <UpdateDialog
+        state={updaterState}
+        currentVersion={appVersion}
+        onConfirm={downloadNow}
+        onDismiss={dismiss}
+        onInstall={installNow}
       />
     </div>
   );

@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("api", {
   selectOutputDir: ()             => ipcRenderer.invoke(IPC.SELECT_DIR),
   getDefaultDir:   ()             => ipcRenderer.invoke(IPC.GET_DEFAULT_DIR),
   openPath:        (p: string)    => ipcRenderer.invoke(IPC.OPEN_PATH, p),
+  getAppVersion:   ()             => ipcRenderer.invoke("app:getVersion"),
 
   // Events
   onProgress: (cb: (p: unknown) => void) => {

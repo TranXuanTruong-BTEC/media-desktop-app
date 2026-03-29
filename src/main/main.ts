@@ -32,6 +32,7 @@ function createWindow(): BrowserWindow {
 
 function registerAppHandlers(win: BrowserWindow) {
   ipcMain.handle("app:getDefaultDir", () => app.getPath("downloads"));
+  ipcMain.handle("app:getVersion",    () => app.getVersion());
   ipcMain.handle("app:openPath", async (_evt: unknown, filePath: string) => {
     await shell.showItemInFolder(filePath);
   });
