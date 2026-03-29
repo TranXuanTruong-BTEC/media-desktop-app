@@ -2,6 +2,7 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "path";
 import { registerDownloadHandlers } from "./ipc/download.js";
+import { registerUpdaterHandlers }  from "./ipc/updater.js";
 
 const isDev = !app.isPackaged;
 
@@ -44,6 +45,7 @@ function registerAppHandlers(win: BrowserWindow) {
 app.whenReady().then(() => {
   const win = createWindow();
   registerDownloadHandlers(win);
+  registerUpdaterHandlers(win);
   registerAppHandlers(win);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -1,5 +1,10 @@
 // src/shared/ipc-types.ts
 export const IPC = {
+  // Auto-updater
+  UPDATER_CHECK:        "updater:check",
+  UPDATER_STATUS:       "updater:status",
+  UPDATER_DOWNLOAD_NOW: "updater:downloadNow",
+  UPDATER_INSTALL_NOW:  "updater:installNow",
   DOWNLOAD_START:    "download:start",
   DOWNLOAD_CANCEL:   "download:cancel",
   DOWNLOAD_PAUSE:    "download:pause",

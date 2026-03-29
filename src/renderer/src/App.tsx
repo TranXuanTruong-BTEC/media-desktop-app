@@ -4,12 +4,15 @@ import { useDownload } from "./hooks/useDownload";
 import { DownloadForm } from "./components/DownloadForm";
 import { DownloadItemRow } from "./components/DownloadItem";
 import { StatusBar } from "./components/StatusBar";
-import { Titlebar } from "./components/Titlebar";
+import { Titlebar }     from "./components/Titlebar";
+import { UpdateBanner } from "./components/UpdateBanner";
+import { useUpdater }   from "./hooks/useUpdater";
 import { VideoQuality } from "../../shared/ipc-types";
 
 export default function App() {
   const [outputDir, setOutputDir] = useState("");
   const { items, addDownload, cancelDownload, removeItem, clearCompleted, selectOutputDir, stats } = useDownload(outputDir);
+  const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
 
   useEffect(() => {
     window.api?.getDefaultDir?.().then(d => { if (d) setOutputDir(d); }).catch(() => {});
@@ -60,6 +63,14 @@ export default function App() {
           ))
         )}
       </div>
+
+      {/* Update banner — above status bar */}
+      <UpdateBanner
+        state={updaterState}
+        onDownload={downloadNow}
+        onInstall={installNow}
+        onDismiss={dismiss}
+      />
 
       {/* Status bar */}
       <StatusBar

@@ -10,6 +10,11 @@ const IPC = {
   DOWNLOAD_COMPLETE: "download:complete",
   DOWNLOAD_ERROR:    "download:error",
   OPEN_PATH:         "app:openPath",
+  // Auto-updater
+  UPDATER_CHECK:        "updater:check",
+  UPDATER_STATUS:       "updater:status",
+  UPDATER_DOWNLOAD_NOW: "updater:downloadNow",
+  UPDATER_INSTALL_NOW:  "updater:installNow",
 } as const;
 
 contextBridge.exposeInMainWorld("api", {
@@ -41,4 +46,14 @@ contextBridge.exposeInMainWorld("api", {
   winMinimize: () => ipcRenderer.send("win:minimize"),
   winMaximize: () => ipcRenderer.send("win:maximize"),
   winClose:    () => ipcRenderer.send("win:close"),
+
+  // Auto-updater
+  checkForUpdate:    () => ipcRenderer.invoke(IPC.UPDATER_CHECK),
+  downloadUpdate:    () => ipcRenderer.invoke(IPC.UPDATER_DOWNLOAD_NOW),
+  installUpdate:     () => ipcRenderer.invoke(IPC.UPDATER_INSTALL_NOW),
+  onUpdaterStatus:   (cb: (s: unknown) => void) => {
+    const fn = (_: unknown, s: unknown) => cb(s);
+    ipcRenderer.on(IPC.UPDATER_STATUS, fn);
+    return () => ipcRenderer.removeListener(IPC.UPDATER_STATUS, fn);
+  },
 });
