@@ -53,6 +53,8 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
   });
 
   autoUpdater.on("error", (err: Error) => {
+    // Bỏ qua lỗi chưa có release trên GitHub
+    if (err.message.includes("latest.yml") || err.message.includes("ENOENT")) return;
     send(win, { phase: "error", message: err.message });
   });
 
