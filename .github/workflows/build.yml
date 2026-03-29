@@ -31,6 +31,53 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate icon 256x256
+        shell: python
+        run: |
+          import struct, zlib, os
+
+          def make_png(size, r, g, b):
+              sig = b'\x89PNG\r\n\x1a\n'
+              ihdr_data = struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)
+              ihdr_crc = zlib.crc32(b'IHDR' + ihdr_data) & 0xffffffff
+              ihdr = struct.pack('>I', 13) + b'IHDR' + ihdr_data + struct.pack('>I', ihdr_crc)
+              raw = b''
+              for y in range(size):
+                  raw += b'\x00'
+                  for x in range(size):
+                      cx, cy = size // 2, size // 2
+                      d = ((x - cx)**2 + (y - cy)**2) ** 0.5
+                      margin = size * 0.08
+                      if x < margin or x >= size - margin or y < margin or y >= size - margin:
+                          raw += bytes([15, 40, 100])
+                      else:
+                          raw += bytes([r, g, b])
+              comp = zlib.compress(raw)
+              idat_crc = zlib.crc32(b'IDAT' + comp) & 0xffffffff
+              idat = struct.pack('>I', len(comp)) + b'IDAT' + comp + struct.pack('>I', idat_crc)
+              iend_crc = zlib.crc32(b'IEND') & 0xffffffff
+              iend = struct.pack('>I', 0) + b'IEND' + struct.pack('>I', iend_crc)
+              return sig + ihdr + idat + iend
+
+          def make_ico(path):
+              sizes = [256, 64, 48, 32, 16]
+              images = [make_png(s, 37, 99, 235) for s in sizes]
+              count = len(images)
+              header = struct.pack('<HHH', 0, 1, count)
+              offset = 6 + count * 16
+              entries = b''
+              for i, (s, img) in enumerate(zip(sizes, images)):
+                  w = 0 if s == 256 else s
+                  h = 0 if s == 256 else s
+                  entries += struct.pack('<BBBBHHII', w, h, 0, 0, 1, 32, len(img), offset)
+                  offset += len(img)
+              os.makedirs('build', exist_ok=True)
+              with open(path, 'wb') as f:
+                  f.write(header + entries + b''.join(images))
+              print(f'Icon created: {path}')
+
+          make_ico('build/icon.ico')
+
       - name: Download yt-dlp.exe
         shell: powershell
         run: |
@@ -40,8 +87,7 @@ jobs:
       - name: Download node.exe (portable)
         shell: powershell
         run: |
-          $url = "https://nodejs.org/dist/v20.11.1/win-x64/node.exe"
-          Invoke-WebRequest -Uri $url -OutFile "tools/node.exe"
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/v20.11.1/win-x64/node.exe" -OutFile "tools/node.exe"
 
       - name: Build app
         run: npm run build
