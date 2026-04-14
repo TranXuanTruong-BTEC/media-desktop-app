@@ -1,13 +1,15 @@
 // src/renderer/src/App.tsx
 import { useState, useEffect } from "react";
-import { useDownload }    from "./hooks/useDownload";
-import { DownloadForm }   from "./components/DownloadForm";
-import { DownloadItemRow } from "./components/DownloadItem";
-import { StatusBar }      from "./components/StatusBar";
-import { Titlebar }       from "./components/Titlebar";
-import { UpdateDialog }   from "./components/UpdateDialog";
-import { useUpdater }     from "./hooks/useUpdater";
-import { VideoQuality }   from "../../shared/ipc-types";
+import { useDownload }         from "./hooks/useDownload";
+import { useUpdater }          from "./hooks/useUpdater";
+import { useYtdlpUpdater }     from "./hooks/useYtdlpUpdater";
+import { DownloadForm }        from "./components/DownloadForm";
+import { DownloadItemRow }     from "./components/DownloadItem";
+import { StatusBar }           from "./components/StatusBar";
+import { Titlebar }            from "./components/Titlebar";
+import { UpdateDialog }        from "./components/UpdateDialog";
+import { YtdlpUpdateBanner }   from "./components/YtdlpUpdateBanner";
+import { VideoQuality }        from "../../shared/ipc-types";
 
 export default function App() {
   const [outputDir, setOutputDir]   = useState("");
@@ -16,6 +18,7 @@ export default function App() {
   const { items, addDownload, cancelDownload, removeItem, clearCompleted, selectOutputDir, stats } =
     useDownload(outputDir);
   const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
+  const { state: ytdlpState, forceUpdate, dismiss: dismissYtdlp } = useYtdlpUpdater();
 
   useEffect(() => {
     window.api?.getDefaultDir?.().then(d => { if (d) setOutputDir(d); }).catch(() => {});
@@ -47,6 +50,12 @@ export default function App() {
         onOutputDirChange={setOutputDir}
         onSelectDir={handleSelectDir}
         onSubmit={handleSubmit}
+      />
+
+      <YtdlpUpdateBanner
+        state={ytdlpState}
+        onForce={forceUpdate}
+        onDismiss={dismissYtdlp}
       />
 
       <div className="flex-1 overflow-y-auto">

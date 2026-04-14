@@ -15,6 +15,7 @@ export const IPC = {
   DOWNLOAD_PROGRESS: "download:progress",
   DOWNLOAD_COMPLETE: "download:complete",
   DOWNLOAD_ERROR:    "download:error",
+  DOWNLOAD_RETRYING: "download:retrying",
   FORMATS_READY:     "download:formatsReady",
 } as const;
 
@@ -50,4 +51,13 @@ export interface DownloadComplete {
 export interface DownloadError {
   id: string;
   message: string;
+}
+
+/** Phát trước mỗi lần retry — UI dùng để hiển thị "Thử lại 2/3" */
+export interface DownloadRetrying {
+  id: string;
+  attempt: number;   // lần thử hiện tại (1-based, tức lần retry đầu = 1)
+  maxAttempts: number;
+  reason: string;    // lý do thử lại (tóm tắt lỗi)
+  delayMs: number;   // số ms sẽ chờ trước khi spawn lại
 }

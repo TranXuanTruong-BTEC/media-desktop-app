@@ -1,11 +1,11 @@
 // src/renderer/src/components/DownloadItem.tsx
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { DownloadItem } from "../hooks/useDownload";
 
 interface Props {
-  item: DownloadItem;
-  onCancel: (id: string) => void;
-  onRemove: (id: string) => void;
+  item:         DownloadItem;
+  onCancel:     (id: string) => void;
+  onRemove:     (id: string) => void;
   onOpenFolder: (id: string) => void;
 }
 
@@ -17,6 +17,7 @@ const QUALITY_LABEL: Record<string, string> = {
 
 const STATUS_COLOR: Record<string, string> = {
   downloading: "#3b82f6",
+  retrying:    "#f59e0b",
   done:        "#22c55e",
   error:       "#ef4444",
   cancelled:   "#4b5563",
@@ -25,46 +26,89 @@ const STATUS_COLOR: Record<string, string> = {
 
 function StatusBadge({ status }: { status: string }) {
   const color = STATUS_COLOR[status] ?? "#4b5563";
-  const label = { downloading: "Đang tải", done: "Hoàn thành", error: "Lỗi", cancelled: "Đã hủy", queued: "Chờ" }[status] ?? status;
+  const label: Record<string, string> = {
+    downloading: "Đang tải",
+    retrying:    "Thử lại",
+    done:        "Hoàn thành",
+    error:       "Lỗi",
+    cancelled:   "Đã hủy",
+    queued:      "Chờ",
+  };
   return (
-    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ color, background: color + "22" }}>
-      {label}
+    <span
+      className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+      style={{ color, background: color + "22" }}
+    >
+      {label[status] ?? status}
     </span>
   );
 }
 
 function SpeedDot() {
   return (
-    <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent mr-1.5" style={{
-      boxShadow: "0 0 4px #3b82f6",
-      animation: "pulse 1s ease-in-out infinite",
-    }} />
+    <span
+      className="inline-block w-1.5 h-1.5 rounded-full bg-accent mr-1.5"
+      style={{ boxShadow: "0 0 4px #3b82f6", animation: "pulse 1s ease-in-out infinite" }}
+    />
   );
 }
 
+/** Đếm ngược số giây còn lại trước khi retry */
+function RetryCountdown({ delayMs, startedAt }: { delayMs: number; startedAt: number }) {
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, Math.ceil((startedAt + delayMs - Date.now()) / 1000))
+  );
+
+  useEffect(() => {
+    if (remaining <= 0) return;
+    const t = setInterval(() => {
+      const secs = Math.max(0, Math.ceil((startedAt + delayMs - Date.now()) / 1000));
+      setRemaining(secs);
+      if (secs <= 0) clearInterval(t);
+    }, 250);
+    return () => clearInterval(t);
+  }, [delayMs, startedAt]);
+
+  if (remaining <= 0) return null;
+  return <span className="text-[10px] text-[#f59e0b] shrink-0">({remaining}s)</span>;
+}
+
 export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Props) {
-  const isActive = item.status === "downloading";
-  const isDone   = item.status === "done";
-  const isError  = item.status === "error";
+  const isActive    = item.status === "downloading";
+  const isRetrying  = item.status === "retrying";
+  const isDone      = item.status === "done";
+  const isError     = item.status === "error";
+  const isCancelled = item.status === "cancelled";
+
+  const accent = isRetrying ? "#f59e0b" : isError ? "#ef4444" : isDone ? "#22c55e" : "#3b82f6";
 
   const displayName = item.filename
     ? (item.filename.length > 70 ? item.filename.slice(0, 67) + "…" : item.filename)
     : (item.url.length > 70 ? item.url.slice(0, 67) + "…" : item.url);
 
   return (
-    <div className={`fade-in flex flex-col gap-1.5 px-3 py-2.5 border-b border-[#1e2333] hover:bg-white/[0.02] transition-colors ${isError ? "bg-red-500/5" : ""}`}>
-      {/* Row 1: filename + badges + actions */}
+    <div
+      className={`fade-in flex flex-col gap-1.5 px-3 py-2.5 border-b border-[#1e2333]
+        hover:bg-white/[0.02] transition-colors
+        ${isError ? "bg-red-500/5" : ""}
+        ${isRetrying ? "bg-yellow-500/5" : ""}
+      `}
+    >
+      {/* Row 1: icon + name + badges + actions */}
       <div className="flex items-center gap-2">
         {/* File icon */}
-        <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 ${isDone ? "bg-success/15" : isError ? "bg-danger/15" : "bg-accent/15"}`}>
+        <div
+          className="w-6 h-6 rounded flex items-center justify-center shrink-0"
+          style={{ background: accent + "22" }}
+        >
           {item.quality.startsWith("audio") ? (
             <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5">
-              <path d="M9 2v8.5a2 2 0 11-2-2V4l4-1V2H9z" stroke={isDone ? "#22c55e" : isError ? "#ef4444" : "#3b82f6"} strokeWidth="1.3" strokeLinecap="round"/>
+              <path d="M9 2v8.5a2 2 0 11-2-2V4l4-1V2H9z" stroke={accent} strokeWidth="1.3" strokeLinecap="round"/>
             </svg>
           ) : (
             <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5">
-              <rect x="2" y="2" width="12" height="12" rx="2" stroke={isDone ? "#22c55e" : isError ? "#ef4444" : "#3b82f6"} strokeWidth="1.3"/>
-              <path d="M6 5.5l4 2.5-4 2.5V5.5z" fill={isDone ? "#22c55e" : isError ? "#ef4444" : "#3b82f6"}/>
+              <rect x="2" y="2" width="12" height="12" rx="2" stroke={accent} strokeWidth="1.3"/>
+              <path d="M6 5.5l4 2.5-4 2.5V5.5z" fill={accent}/>
             </svg>
           )}
         </div>
@@ -75,17 +119,16 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
           {displayName}
         </span>
 
-        {/* Quality tag */}
+        {/* Quality */}
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#252a38] text-subtle shrink-0">
           {QUALITY_LABEL[item.quality] ?? item.quality}
         </span>
 
-        {/* Status */}
         <StatusBadge status={item.status} />
 
         {/* Actions */}
         <div className="flex items-center gap-1 shrink-0">
-          {isActive && (
+          {(isActive || isRetrying) && (
             <button
               onClick={() => onCancel(item.id)}
               title="Hủy"
@@ -107,7 +150,7 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
               </svg>
             </button>
           )}
-          {(isDone || isError || item.status === "cancelled") && (
+          {(isDone || isError || isCancelled) && (
             <button
               onClick={() => onRemove(item.id)}
               title="Xóa khỏi danh sách"
@@ -121,7 +164,7 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
         </div>
       </div>
 
-      {/* Row 2: progress bar */}
+      {/* Row 2: progress bar (downloading) */}
       {isActive && (
         <div className="flex items-center gap-2 pl-8">
           <div className="flex-1 h-1.5 bg-[#1e2333] rounded-full overflow-hidden">
@@ -139,7 +182,28 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
         </div>
       )}
 
-      {/* Row 2: done — full bar */}
+      {/* Row 2: retrying — amber bar + countdown */}
+      {isRetrying && item.retryInfo && (
+        <div className="flex items-center gap-2 pl-8">
+          {/* Frozen progress bar in amber */}
+          <div className="flex-1 h-1.5 bg-[#1e2333] rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{ width: `${item.percent}%`, background: "linear-gradient(90deg, #b45309, #f59e0b)" }}
+            />
+          </div>
+          <span className="text-[10px] text-subtle w-8 text-right shrink-0">{item.percent.toFixed(0)}%</span>
+          <span className="text-[10px] text-[#f59e0b] shrink-0">
+            Thử lại {item.retryInfo.attempt}/{item.retryInfo.maxAttempts - 1}
+          </span>
+          <RetryCountdown
+            delayMs={item.retryInfo.delayMs}
+            startedAt={item.retryInfo.startedAt}
+          />
+        </div>
+      )}
+
+      {/* Row 2: done */}
       {isDone && (
         <div className="pl-8">
           <div className="h-1.5 bg-success/20 rounded-full overflow-hidden">
@@ -148,7 +212,7 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
         </div>
       )}
 
-      {/* Row 2: error message */}
+      {/* Row 2: error */}
       {isError && item.error && (
         <div className="pl-8 text-[11px] text-danger/80 truncate" title={item.error}>
           ⚠ {item.error}
