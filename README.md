@@ -100,13 +100,13 @@ GitHub Actions sẽ tự động build và upload `MediaGet-Setup.exe` + `latest
 ```
 media-desktop-app/
 ├── src/
-│   ├── main/                  # Electron main process
-│   │   ├── main.ts            # Entry point, tạo cửa sổ
-│   │   ├── preload.ts         # Bridge main ↔ renderer
+│   ├── main/                  
+│   │   ├── main.ts            
+│   │   ├── preload.ts         
 │   │   └── ipc/
-│   │       ├── download.ts    # Xử lý tải video (yt-dlp)
-│   │       └── updater.ts     # Auto-updater (electron-updater)
-│   ├── renderer/              # React UI
+│   │       ├── download.ts    
+│   │       └── updater.ts     
+│   ├── renderer/              
 │   │   └── src/
 │   │       ├── App.tsx
 │   │       ├── components/
@@ -114,17 +114,17 @@ media-desktop-app/
 │   │       │   ├── DownloadForm.tsx
 │   │       │   ├── DownloadItem.tsx
 │   │       │   ├── StatusBar.tsx
-│   │       │   ├── UpdateDialog.tsx  # Dialog cập nhật
+│   │       │   ├── UpdateDialog.tsx 
 │   │       │   └── NoNodeWarning.tsx
 │   │       └── hooks/
 │   │           ├── useDownload.ts
-│   │           └── useUpdater.ts     # Hook quản lý update state
+│   │           └── useUpdater.ts  
 │   └── shared/
-│       └── ipc-types.ts       # Types dùng chung
-├── tools/                     # yt-dlp.exe, node.exe (không commit)
-├── build/                     # Icon, resources
+│       └── ipc-types.ts       
+├── tools/                    
+├── build/                     
 ├── .github/workflows/
-│   └── build.yml              # CI/CD tự động build + release
+│   └── build.yml             
 ├── package.json
 └── vite.config.ts
 ```
@@ -160,9 +160,9 @@ media-desktop-app/
 Pull request và issue luôn được chào đón.
 
 1. Fork repo
-2. Tạo branch: `git checkout -b feature/ten-tinh-nang`
+2. Tạo branch: `git checkout -b feature/tentinhnang`
 3. Commit: `git commit -m "feat: thêm tính năng X"`
-4. Push: `git push origin feature/ten-tinh-nang`
+4. Push: `git push origin feature/tentinhnang`
 5. Mở Pull Request
 
 ---
