@@ -1,0 +1,65 @@
+// src/shared/ipc-types.ts
+export const IPC = {
+  // Auto-updater
+  UPDATER_CHECK:        "updater:check",
+  UPDATER_STATUS:       "updater:status",
+  UPDATER_DOWNLOAD_NOW: "updater:downloadNow",
+  UPDATER_INSTALL_NOW:  "updater:installNow",
+  DOWNLOAD_START:    "download:start",
+  DOWNLOAD_CANCEL:   "download:cancel",
+  DOWNLOAD_PAUSE:    "download:pause",
+  DOWNLOAD_RESUME:   "download:resume",
+  SELECT_DIR:        "dialog:select-dir",
+  GET_DEFAULT_DIR:   "app:getDefaultDir",
+  GET_FORMATS:       "download:getFormats",
+  DOWNLOAD_PROGRESS: "download:progress",
+  DOWNLOAD_COMPLETE: "download:complete",
+  DOWNLOAD_ERROR:    "download:error",
+  DOWNLOAD_RETRYING: "download:retrying",
+  FORMATS_READY:     "download:formatsReady",
+} as const;
+
+export type VideoQuality = "bestvideo+bestaudio" | "1080p" | "720p" | "480p" | "360p" | "audio_mp3" | "audio_m4a";
+
+export interface DownloadRequest {
+  id: string;
+  url: string;
+  quality: VideoQuality;
+  outputDir: string;
+}
+
+export interface FormatRequest {
+  id: string;
+  url: string;
+}
+
+export interface DownloadProgress {
+  id: string;
+  percent: number;
+  speed: string;
+  eta: string;
+  filename: string;
+  size: string;
+}
+
+export interface DownloadComplete {
+  id: string;
+  filepath: string;
+  filename: string;
+  /** Ghi chú khi yt-dlp phải hạ cấp/đổi cách tải (vd. thiếu ffmpeg) dù vẫn "thành công" */
+  warning?: string;
+}
+
+export interface DownloadError {
+  id: string;
+  message: string;
+}
+
+/** Phát trước mỗi lần retry — UI dùng để hiển thị "Thử lại 2/3" */
+export interface DownloadRetrying {
+  id: string;
+  attempt: number;   // lần thử hiện tại (1-based, tức lần retry đầu = 1)
+  maxAttempts: number;
+  reason: string;    // lý do thử lại (tóm tắt lỗi)
+  delayMs: number;   // số ms sẽ chờ trước khi spawn lại
+}
