@@ -1,6 +1,7 @@
 // src/main/ipc/updater.ts
 import { ipcMain, BrowserWindow, app } from "electron";
 import { autoUpdater, UpdateInfo } from "electron-updater";
+import { logger } from "../core/logger.js";
 
 export type UpdateStatus =
   | { phase: "idle" }
@@ -21,7 +22,15 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowDowngrade = false;
 
-  // ── Events ──────────────────────────────────────────────────────────────
+  autoUpdater.logger = {
+    info:  (m?: unknown) => logger.info("updater",  String(m)),
+    warn:  (m?: unknown) => logger.warn("updater",  String(m)),
+    error: (m?: unknown) => logger.error("updater", String(m)),
+    debug: () => {},
+  };
+
+  let stage: "check" | "download" = "check";
+
   autoUpdater.on("checking-for-update", () => {
     send(win, { phase: "checking" });
   });
@@ -45,6 +54,7 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
   });
 
   autoUpdater.on("download-progress", (p) => {
+    stage = "download";
     send(win, { phase: "downloading", percent: Math.round(p.percent) });
   });
 
@@ -53,24 +63,25 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
   });
 
   autoUpdater.on("error", (err: Error) => {
-    // Bỏ qua lỗi chưa có release trên GitHub
-    if (err.message.includes("latest.yml") || err.message.includes("ENOENT")) return;
-    send(win, { phase: "error", message: err.message });
+    logger.error("updater", `error (stage=${stage})`, err);
+    if (stage === "download") send(win, { phase: "error", message: err.message });
   });
 
-  // ── IPC handlers ─────────────────────────────────────────────────────────
   ipcMain.handle("updater:check", async () => {
+    stage = "check";
     try {
       await autoUpdater.checkForUpdates();
     } catch (e: any) {
-      send(win, { phase: "error", message: e?.message ?? "Unknown error" });
+      logger.error("updater", "checkForUpdates thất bại", e);
     }
   });
 
   ipcMain.handle("updater:downloadNow", async () => {
+    stage = "download";
     try {
       await autoUpdater.downloadUpdate();
     } catch (e: any) {
+      logger.error("updater", "downloadUpdate thất bại", e);
       send(win, { phase: "error", message: e?.message ?? "Download failed" });
     }
   });
@@ -79,10 +90,6 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
     autoUpdater.quitAndInstall(false, true);
   });
 
-  // ── Auto-check after 3 s on startup (only in packaged app) ───────────────
-  if (app.isPackaged) {
-    setTimeout(() => {
-      autoUpdater.checkForUpdates().catch(() => {/* silently ignore on startup */});
-    }, 3000);
-  }
+  // Việc kiểm tra khi khởi động do renderer (App.tsx) kích hoạt sau 2s qua "updater:check".
+  // Trước đây main cũng tự check thêm 1 lần sau 3s -> 2 lần check chồng nhau.
 }

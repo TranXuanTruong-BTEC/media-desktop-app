@@ -1,6 +1,6 @@
 {
   "name": "media-desktop-app",
-  "version": "2.5.6",
+  "version": "2.5.7",
   "description": "Tải video/audio từ YouTube, TikTok, Facebook và 1000+ trang",
   "author": "TranXuanTruong-BTEC",
   "private": true,
@@ -14,7 +14,9 @@
     "dist": "npm run build && electron-builder --win",
     "postinstall": "electron-builder install-app-deps && node scripts/fetch-ffmpeg.js",
     "fetch:ffmpeg": "node scripts/fetch-ffmpeg.js",
-    "predist": "node scripts/fetch-ffmpeg.js --required"
+    "predist": "node scripts/fetch-ffmpeg.js --required",
+    "prerelease": "node scripts/fetch-ffmpeg.js --required && npm run build",
+    "release": "electron-builder --win --publish always"
   },
   "dependencies": {
     "electron-updater": "^6.1.7",
