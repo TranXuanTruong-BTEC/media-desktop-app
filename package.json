@@ -14,9 +14,7 @@
     "dist": "npm run build && electron-builder --win",
     "postinstall": "electron-builder install-app-deps && node scripts/fetch-ffmpeg.js",
     "fetch:ffmpeg": "node scripts/fetch-ffmpeg.js",
-    "predist": "node scripts/fetch-ffmpeg.js --required",
-    "prerelease": "node scripts/fetch-ffmpeg.js --required && npm run build",
-    "release": "electron-builder --win --publish always"
+    "predist": "node scripts/fetch-ffmpeg.js --required"
   },
   "dependencies": {
     "electron-updater": "^6.1.7",
