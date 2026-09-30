@@ -17,7 +17,7 @@ import path              from "path";
 import fs                from "fs";
 import https             from "https";
 import { app }           from "electron";
-import { getToolsDir, getYtDlpPath } from "./downloader.js";
+import { getUserToolsDir, getYtDlpPath } from "./downloader.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,8 +68,8 @@ function fetchLatestTag(): Promise<string> {
       if (depth > 5) { reject(new Error("Quá nhiều redirect")); return; }
 
       https.get(url, { headers: { "User-Agent": "media-desktop-app" } }, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          get(res.headers.location!, depth + 1);
+        if ([301, 302, 303, 307, 308].includes(res.statusCode ?? 0) && res.headers.location) {
+          get(res.headers.location, depth + 1);
           return;
         }
         if (res.statusCode !== 200) {
@@ -110,8 +110,8 @@ function downloadFile(
       if (depth > 5) { reject(new Error("Quá nhiều redirect")); return; }
 
       https.get(currentUrl, { headers: { "User-Agent": "media-desktop-app" } }, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          get(res.headers.location!, depth + 1);
+        if ([301, 302, 303, 307, 308].includes(res.statusCode ?? 0) && res.headers.location) {
+          get(res.headers.location, depth + 1);
           return;
         }
         if (res.statusCode !== 200) {
@@ -174,8 +174,9 @@ export function checkAndUpdateYtDlp(force = false): YtdlpUpdaterEmitter {
   const emitter = new EventEmitter() as YtdlpUpdaterEmitter;
 
   (async () => {
-    const ytDlpPath = getYtDlpPath();
-    const toolsDir  = getToolsDir();
+    const destPath = path.join(getUserToolsDir(), "yt-dlp.exe");
+    const ytDlpPath = fs.existsSync(destPath) ? destPath : getYtDlpPath();
+    const toolsDir  = getUserToolsDir();
 
     // Đảm bảo thư mục tools/ tồn tại
     if (!fs.existsSync(toolsDir)) {
@@ -211,11 +212,11 @@ export function checkAndUpdateYtDlp(force = false): YtdlpUpdaterEmitter {
     emitter.emit("status", { phase: "update-found", current: current ?? "(chưa có)", latest });
 
     if (!app.isPackaged) {
-      console.log(`[ytdlp-updater] Đang tải ${YTDLP_DOWNLOAD_URL(latest)} → ${ytDlpPath}`);
+      console.log(`[ytdlp-updater] Đang tải ${YTDLP_DOWNLOAD_URL(latest)} → ${destPath}`);
     }
 
     try {
-      await downloadFile(YTDLP_DOWNLOAD_URL(latest), ytDlpPath, (percent) => {
+      await downloadFile(YTDLP_DOWNLOAD_URL(latest), destPath, (percent) => {
         emitter.emit("status", { phase: "downloading", percent, latest });
       });
     } catch (e: any) {
@@ -223,7 +224,7 @@ export function checkAndUpdateYtDlp(force = false): YtdlpUpdaterEmitter {
       return;
     }
 
-    const verified = getCurrentVersion(ytDlpPath);
+    const verified = getCurrentVersion(destPath);
     if (!app.isPackaged) {
       console.log(`[ytdlp-updater] Verified version sau update: ${verified}`);
     }

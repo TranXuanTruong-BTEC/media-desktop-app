@@ -42,7 +42,7 @@ export interface Downloader extends EventEmitter {
 // ─── Regex ───────────────────────────────────────────────────────────────────
 
 const PROGRESS_RE =
-  /\[download\]\s+([\d.]+)%\s+of\s+([\d.]+\S+)\s+at\s+([\d.]+\S+\/s)\s+ETA\s+(\S+)/;
+  /\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+\S+)\s+at\s+(\S+)\s+ETA\s+(\S+)/;
 
 // Lỗi mạng tạm thời → retry + resume
 const NETWORK_PATTERNS = [
@@ -56,6 +56,8 @@ const NETWORK_PATTERNS = [
   /remote end closed connection/i,
   /read error/i,
   /incomplete download/i,
+  /http error 403/i,
+  /http error 429/i,
   /http error 5\d\d/i,
   /got server http error/i,
   /fragment \d+ not found/i,
@@ -81,21 +83,43 @@ function classifyError(stderr: string, stdout: string): "network" | "fatal" {
   return "fatal"; // unknown → không retry vô ích
 }
 
-function summarizeError(stderr: string): string {
-  const lines = stderr.split("\n").map(l => l.trim()).filter(Boolean);
+function summarizeError(stderr: string, stdout = ""): string {
+  const combined = stderr + "\n" + stdout;
+  const lines = combined.split("\n").map(l => l.trim()).filter(Boolean);
+  const hint = lines.find(l => /n challenge solving failed|no supported javascript runtime|requested format is not available|sign in to confirm/i.test(l));
+  if (hint) return hint;
   return lines.find(l => /error|failed|unable/i.test(l)) ?? lines[lines.length - 1] ?? "Lỗi không xác định";
 }
 
 // ─── Tool paths ───────────────────────────────────────────────────────────────
 
-export function getToolsDir(): string {
+export function getBundledToolsDir(): string {
   return app.isPackaged
     ? path.join(process.resourcesPath, "tools")
     : path.join(process.cwd(), "tools");
 }
 
+/** Thư mục ghi được (userData) — dùng để cập nhật yt-dlp, vì Program Files thường không ghi được. */
+export function getUserToolsDir(): string {
+  return path.join(app.getPath("userData"), "tools");
+}
+
+export function getToolsDir(): string {
+  return getBundledToolsDir();
+}
+
+function toolCandidate(name: string): string[] {
+  return [
+    path.join(getUserToolsDir(), name),
+    path.join(getBundledToolsDir(), name),
+  ];
+}
+
 export function getYtDlpPath(): string {
-  return path.join(getToolsDir(), "yt-dlp.exe");
+  for (const p of toolCandidate("yt-dlp.exe")) {
+    if (fs.existsSync(p)) return p;
+  }
+  return path.join(getBundledToolsDir(), "yt-dlp.exe");
 }
 
 // Cache kết quả tìm node.exe: trước đây hàm này gọi execSync("where node")
@@ -108,8 +132,10 @@ let cachedNodeExe: string | null | undefined;
 export function findNodeExe(): string | null {
   if (cachedNodeExe !== undefined) return cachedNodeExe;
 
-  const bundled = path.join(getToolsDir(), "node.exe");
+  const bundled = path.join(getBundledToolsDir(), "node.exe");
+  const userNode = path.join(getUserToolsDir(), "node.exe");
   if (fs.existsSync(bundled)) return (cachedNodeExe = bundled);
+  if (fs.existsSync(userNode)) return (cachedNodeExe = userNode);
 
   try {
     const out = execSync("where node", { encoding: "utf8", timeout: 3000 }).trim();
@@ -146,7 +172,9 @@ let cachedFfmpeg: string | null | undefined;
 export function findFfmpeg(): string | null {
   if (cachedFfmpeg !== undefined) return cachedFfmpeg;
 
-  const bundled = path.join(getToolsDir(), "ffmpeg.exe");
+  const userFfmpeg = path.join(getUserToolsDir(), "ffmpeg.exe");
+  if (fs.existsSync(userFfmpeg)) return (cachedFfmpeg = userFfmpeg);
+  const bundled = path.join(getBundledToolsDir(), "ffmpeg.exe");
   if (fs.existsSync(bundled)) return (cachedFfmpeg = bundled);
 
   try {
@@ -215,6 +243,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
     "--windows-filenames",
     "--trim-filenames", "150",
     ...jsRuntime,
+    "--remote-components", "ejs:github",
     ...(ffmpeg ? ["--ffmpeg-location", ffmpeg] : []),
     "--newline",
     "-o", outputTpl,
@@ -310,9 +339,21 @@ function runAttempt(
 ): Promise<AttemptResult> {
   return new Promise((resolve) => {
     const { args, warning } = buildArgs(req);
+    const toolsDir = path.dirname(ytDlp);
+    const nodeExe = findNodeExe();
+    const extraPath = [toolsDir, nodeExe ? path.dirname(nodeExe) : "", getBundledToolsDir()]
+      .filter(Boolean)
+      .join(path.delimiter);
     let proc: ChildProcess;
     try {
-      proc = spawn(ytDlp, args);
+      proc = spawn(ytDlp, args, {
+        windowsHide: true,
+        cwd: toolsDir,
+        env: {
+          ...process.env,
+          PATH: extraPath + path.delimiter + (process.env.PATH ?? ""),
+        },
+      });
     } catch (err) {
       // spawn() có thể throw đồng bộ (vd. thiếu quyền thực thi) — trước đây
       // lỗi này không được bắt, dễ làm main process crash.
@@ -332,17 +373,14 @@ function runAttempt(
     let stdoutBuf    = "";
     let stderrBuf    = "";
 
-    proc.stdout?.on("data", (buf: Buffer) => {
-      const text = buf.toString();
-      stdoutBuf += text;
+    const consume = (text: string) => {
+      for (const line of text.split(/\r?\n/)) {
+        if (line.includes("[download] Destination:"))
+          lastFilename = path.basename(line.replace(/^.*\[download\] Destination:/, "").trim());
 
-      for (const line of text.split("\n")) {
-        if (line.startsWith("[download] Destination:"))
-          lastFilename = path.basename(line.replace("[download] Destination:", "").trim());
-
-        if (line.startsWith("[Merger] Merging formats into")) {
-          const m = line.match(/"([^"]+)"/);
-          if (m) lastFilename = path.basename(m[1]);
+        if (line.includes("[Merger] Merging formats into")) {
+          const mm = line.match(/"([^"]+)"/);
+          if (mm) lastFilename = path.basename(mm[1]);
         }
 
         const m = PROGRESS_RE.exec(line);
@@ -357,11 +395,19 @@ function runAttempt(
           });
         }
       }
+    };
+
+    proc.stdout?.on("data", (buf: Buffer) => {
+      const text = buf.toString();
+      stdoutBuf += text;
+      consume(text);
     });
 
     proc.stderr?.on("data", (buf: Buffer) => {
-      stderrBuf += buf.toString();
-      if (!app.isPackaged) process.stderr.write("[ytdlp stderr] " + buf.toString());
+      const text = buf.toString();
+      stderrBuf += text;
+      consume(text);
+      if (!app.isPackaged) process.stderr.write("[ytdlp stderr] " + text);
     });
 
     proc.on("close", (code) => {
@@ -380,7 +426,7 @@ function runAttempt(
       resolve({
         outcome:      kind === "network" ? "network-error" : "fatal-error",
         lastFilename,
-        errorSummary: summarizeError(stderrBuf),
+        errorSummary: summarizeError(stderrBuf, stdoutBuf),
         exitCode:     code,
       });
     });

@@ -1,7 +1,7 @@
 {
   "name": "media-desktop-app",
-  "version": "2.5.11",
-  "description": "Táº£i video/audio tá»« YouTube, TikTok, Facebook vÃ  1000+ trang",
+  "version": "2.5.12",
+  "description": "Tải video/audio từ YouTube, TikTok, Facebook và 1000+ trang",
   "author": "TranXuanTruong-BTEC",
   "private": true,
   "main": "dist-electron/main/main.js",
@@ -14,7 +14,8 @@
     "dist": "npm run build && electron-builder --win",
     "postinstall": "electron-builder install-app-deps && node scripts/fetch-ffmpeg.js",
     "fetch:ffmpeg": "node scripts/fetch-ffmpeg.js",
-    "predist": "node scripts/fetch-ffmpeg.js --required"
+    "predist": "node scripts/fetch-ffmpeg.js --required",
+    "write:latest-yml": "node scripts/write-latest-yml.js"
   },
   "dependencies": {
     "electron-updater": "^6.1.7",
@@ -63,13 +64,14 @@
         "nsis"
       ],
       "icon": "build/icon.ico",
-      "artifactName": "MediaGet-Setup.${ext}"
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "differentialPackage": false
     },
     "publish": [
       {

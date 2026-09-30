@@ -22,12 +22,13 @@ function ProgressBar({ percent }: { percent: number }) {
 }
 
 export function UpdateDialog({ state, currentVersion, onConfirm, onDismiss, onInstall }: Props) {
-  const { phase, version, percent } = state;
+  const { phase, version, percent, errorMsg } = state;
 
   const visible =
     phase === "available" ||
     phase === "downloading" ||
-    phase === "ready";
+    phase === "ready" ||
+    phase === "error";
 
   if (!visible) return null;
 
@@ -44,6 +45,11 @@ export function UpdateDialog({ state, currentVersion, onConfirm, onDismiss, onIn
               {phase === "ready" ? (
                 <svg viewBox="0 0 20 20" fill="none" className="w-5 h-5 text-green-400">
                   <path d="M4 10l4.5 4.5 8-8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              ) : phase === "error" ? (
+                <svg viewBox="0 0 20 20" fill="none" className="w-5 h-5 text-red-400">
+                  <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6"/>
+                  <path d="M10 6v5M10 13.5h.01" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
                 </svg>
               ) : phase === "downloading" ? (
                 <svg className="animate-spin w-5 h-5 text-accent" viewBox="0 0 24 24" fill="none">
@@ -80,6 +86,12 @@ export function UpdateDialog({ state, currentVersion, onConfirm, onDismiss, onIn
                   <p className="text-[11px] text-[#64748b] mt-0.5">MediaGet {version} đã tải xong</p>
                 </>
               )}
+              {phase === "error" && (
+                <>
+                  <p className="text-[13px] font-semibold text-[#f1f5f9]">Không cập nhật được</p>
+                  <p className="text-[11px] text-[#64748b] mt-0.5 break-words">{errorMsg}</p>
+                </>
+              )}
             </div>
           </div>
 
@@ -110,6 +122,14 @@ export function UpdateDialog({ state, currentVersion, onConfirm, onDismiss, onIn
           )}
           {phase === "downloading" && (
             <span className="text-[11px] text-[#475569]">Vui lòng đợi…</span>
+          )}
+          {phase === "error" && (
+            <button
+              onClick={onDismiss}
+              className="text-[12px] px-3 py-1.5 rounded-lg text-[#64748b] hover:text-[#94a3b8] hover:bg-white/5 transition-colors"
+            >
+              Đóng
+            </button>
           )}
           {phase === "ready" && (
             <>

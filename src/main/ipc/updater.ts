@@ -16,11 +16,31 @@ function send(win: BrowserWindow, status: UpdateStatus) {
   if (!win.isDestroyed()) win.webContents.send("updater:status", status);
 }
 
+function friendlyMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "Unknown error");
+  if (/sha512 checksum mismatch/i.test(raw)) {
+    return "File cập nhật không khớp checksum. Hãy tải bản cài đặt mới từ GitHub Releases.";
+  }
+  if (/Cannot parse update info|YAMLException|latest\.yml/i.test(raw)) {
+    return "Không đọc được thông tin phiên bản (latest.yml). Bản phát hành có thể bị lỗi metadata.";
+  }
+  if (/ENOTFOUND|ECONNRESET|ETIMEDOUT|net::/i.test(raw)) {
+    return "Không kết nối được GitHub để kiểm tra cập nhật. Thử lại sau.";
+  }
+  if (/not packed|skip checkForUpdates/i.test(raw)) {
+    return "Chỉ kiểm tra cập nhật trên bản đã cài đặt (không dùng được ở chế độ dev).";
+  }
+  return raw;
+}
+
 export function registerUpdaterHandlers(win: BrowserWindow) {
-  // Configure auto-updater
-  autoUpdater.autoDownload = false;          // We let user decide
+  autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowDowngrade = false;
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.disableDifferentialDownload = true;
+  // Tránh CDN giữ latest.yml cũ (BOM / version lệch) sau khi phát hành lại.
+  autoUpdater.requestHeaders = { "Cache-Control": "no-cache" };
 
   autoUpdater.logger = {
     info:  (m?: unknown) => logger.info("updater",  String(m)),
@@ -28,8 +48,6 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
     error: (m?: unknown) => logger.error("updater", String(m)),
     debug: () => {},
   };
-
-  let stage: "check" | "download" = "check";
 
   autoUpdater.on("checking-for-update", () => {
     send(win, { phase: "checking" });
@@ -54,7 +72,6 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
   });
 
   autoUpdater.on("download-progress", (p) => {
-    stage = "download";
     send(win, { phase: "downloading", percent: Math.round(p.percent) });
   });
 
@@ -63,33 +80,38 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
   });
 
   autoUpdater.on("error", (err: Error) => {
-    logger.error("updater", `error (stage=${stage})`, err);
-    if (stage === "download") send(win, { phase: "error", message: err.message });
+    logger.error("updater", "autoUpdater error", err);
+    send(win, { phase: "error", message: friendlyMessage(err) });
   });
 
   ipcMain.handle("updater:check", async () => {
-    stage = "check";
+    if (!app.isPackaged) {
+      send(win, { phase: "not-available" });
+      return;
+    }
     try {
       await autoUpdater.checkForUpdates();
     } catch (e: any) {
       logger.error("updater", "checkForUpdates thất bại", e);
+      send(win, { phase: "error", message: friendlyMessage(e) });
     }
   });
 
   ipcMain.handle("updater:downloadNow", async () => {
-    stage = "download";
+    if (!app.isPackaged) {
+      send(win, { phase: "error", message: "Không tải cập nhật được ở chế độ dev." });
+      return;
+    }
     try {
+      send(win, { phase: "downloading", percent: 0 });
       await autoUpdater.downloadUpdate();
     } catch (e: any) {
       logger.error("updater", "downloadUpdate thất bại", e);
-      send(win, { phase: "error", message: e?.message ?? "Download failed" });
+      send(win, { phase: "error", message: friendlyMessage(e) });
     }
   });
 
   ipcMain.handle("updater:installNow", () => {
     autoUpdater.quitAndInstall(false, true);
   });
-
-  // Việc kiểm tra khi khởi động do renderer (App.tsx) kích hoạt sau 2s qua "updater:check".
-  // Trước đây main cũng tự check thêm 1 lần sau 3s -> 2 lần check chồng nhau.
 }

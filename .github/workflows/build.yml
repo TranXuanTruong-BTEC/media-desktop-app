@@ -3,13 +3,13 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version (e.g. 2.0.1)'
+        description: "Version (e.g. 2.0.1)"
         required: true
-        default: '2.0.0'
+        default: "2.0.0"
 
 permissions:
   contents: write
@@ -25,8 +25,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -84,55 +84,41 @@ jobs:
           New-Item -ItemType Directory -Force -Path tools
           Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "tools/yt-dlp.exe"
 
-      - name: Download node.exe (portable)
+      # yt-dlp (from 2026) requires Node >= 22 for YouTube JS challenges.
+      - name: Download node.exe (portable Node 22)
         shell: powershell
         run: |
-          Invoke-WebRequest -Uri "https://nodejs.org/dist/v20.11.1/win-x64/node.exe" -OutFile "tools/node.exe"
+          New-Item -ItemType Directory -Force -Path tools
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/latest-v22.x/win-x64/node.exe" -OutFile "tools/node.exe"
 
-      - name: Build app
-        run: npm run build
-
-      # CI lÃ  NÆ I DUY NHáº¤T phÃ¡t hÃ nh. electron-builder chá»‰ build (khÃ´ng tá»± upload)
-      # Ä‘á»ƒ trÃ¡nh 2 nguá»“n cÃ¹ng ghi Ä‘Ã¨ lÃªn release -> exe vÃ  latest.yml lá»‡ch nhau.
-      - name: Build installer (.exe)
+      # CI is the only publisher. electron-builder only builds (never uploads)
+      # so the installer and latest.yml cannot get out of sync from two writers.
+      - name: Build installer
         run: npm run dist -- --publish never
 
-      # KHÃ”NG dá»±a vÃ o electron-builder tá»± sinh latest.yml ná»¯a (Ä‘Ã£ gáº·p trÆ°á»ng há»£p
-      # nÃ³ khÃ´ng sinh ra hoáº·c sinh lá»‡ch mÃ  khÃ´ng rÃµ lÃ½ do trÃªn mÃ¡y CI tháº­t).
-      # Tá»± tÃ­nh sha512 + size tá»« CHÃNH file .exe vá»«a build ra vÃ  tá»± viáº¿t
-      # latest.yml â€” Ä‘áº£m báº£o 2 file nÃ y KHÃ”NG THá»‚ lá»‡ch nhau, vÃ¬ cÃ¹ng láº¥y dá»¯ liá»‡u
-      # tá»« má»™t nguá»“n duy nháº¥t táº¡i Ä‘Ã¢y.
       - name: Generate latest.yml from the built installer
-        shell: powershell
-        run: |
-          $exe = Get-Item release/MediaGet-Setup.exe
-          $hash = (Get-FileHash -Algorithm SHA512 -Path $exe.FullName).Hash
-          $bytes = [byte[]] -split ($hash -replace '..', '0x$& ')
-          $sha512 = [Convert]::ToBase64String($bytes)
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-          @"
-          version: $version
-          files:
-            - url: $($exe.Name)
-              sha512: $sha512
-              size: $($exe.Length)
-          path: $($exe.Name)
-          sha512: $sha512
-          releaseDate: '$date'
-          "@ | Set-Content -Encoding utf8 release/latest.yml
-          Write-Host "Da tao release/latest.yml cho $($exe.Name) ($($exe.Length) bytes)"
-          Get-Content release/latest.yml
+        run: node scripts/write-latest-yml.js
 
-      # Kiá»ƒm tra láº¡i cho cháº¯c: parse láº¡i latest.yml vá»«a táº¡o vÃ  so sÃ¡nh vá»›i file tháº­t
       - name: Verify update metadata matches installer
         shell: powershell
         run: |
-          $exe = Get-Item release/MediaGet-Setup.exe
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           $yml = Get-Content release/latest.yml -Raw
-          if ($yml -notmatch "size:\s*(\d+)") { throw "latest.yml khong co size" }
-          if ([int64]$Matches[1] -ne $exe.Length) { throw "latest.yml size ($($Matches[1])) khac exe ($($exe.Length))" }
-          Write-Host "OK: latest.yml khop installer ($($exe.Length) bytes)"
+          if ($yml -notmatch "path:\s*(\S+)") { throw "latest.yml missing path" }
+          $name = $Matches[1].Trim()
+          $exe = Get-Item "release/$name"
+          if ($yml -notmatch "size:\s*(\d+)") { throw "latest.yml missing size" }
+          if ([int64]$Matches[1] -ne $exe.Length) { throw "latest.yml size ($($Matches[1])) != exe ($($exe.Length))" }
+          if ($yml -notmatch "version:\s*(\S+)") { throw "latest.yml missing version" }
+          $ymlVersion = $Matches[1].Trim().Trim("'").Trim('"')
+          if ($ymlVersion -ne $pkg.version) {
+            throw "latest.yml version ($ymlVersion) != package.json ($($pkg.version))"
+          }
+          $bytes = [System.IO.File]::ReadAllBytes("release/latest.yml")
+          if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            throw "latest.yml has UTF-8 BOM"
+          }
+          Write-Host "OK: latest.yml v$ymlVersion matches $name ($($exe.Length) bytes)"
 
       - name: Upload artifact
         if: success()
@@ -144,17 +130,10 @@ jobs:
             release/latest.yml
           retention-days: 30
 
-      # if: PHáº¢I cÃ³ success() á»Ÿ Ä‘áº§u â€” náº¿u khÃ´ng, bÆ°á»›c nÃ y váº«n cháº¡y dÃ¹ bÆ°á»›c
-      # trÆ°á»›c lá»—i (Ä‘Ã¢y chÃ­nh lÃ  lá»—i khiáº¿n release v2.5.9 chá»‰ cÃ³ .exe, thiáº¿u
-      # latest.yml: bÆ°á»›c kiá»ƒm tra lá»—i nhÆ°ng bÆ°á»›c táº¡o release váº«n cá»© cháº¡y).
       - name: Create GitHub Release
         if: success() && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          # Chá»‰ upload .exe + latest.yml tá»± táº¡o á»Ÿ trÃªn (Ä‘Ã£ Ä‘áº£m báº£o khá»›p nhau).
-          # Bá» .blockmap: cÃ³ nÃ³ thÃ¬ electron-updater táº£i pháº§n chÃªnh lá»‡ch, dá»… vá»¡
-          # náº¿u báº£n trÆ°á»›c bá»‹ lá»—i; khÃ´ng cÃ³ thÃ¬ táº£i nguyÃªn file .exe, cháº­m hÆ¡n
-          # má»™t chÃºt nhÆ°ng cháº¯c cháº¯n khÃ´ng tÃ¡i diá»…n lá»—i checksum mismatch.
           files: |
             release/*.exe
             release/latest.yml
