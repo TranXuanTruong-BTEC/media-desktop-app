@@ -195,15 +195,56 @@ export function findFfmpeg(): string | null {
 
 // ─── Format building ──────────────────────────────────────────────────────────
 
+/** Audio khi ghép video: bỏ MP3 nhạc nền (TikTok/Reels hay để track này là “bestaudio”). */
+const MERGE_AUDIO = "bestaudio[ext!=mp3][acodec!=none]/bestaudio[ext!=mp3]/bestaudio";
+
 const QUALITY_FORMAT: Record<VideoQuality, string> = {
-  "bestvideo+bestaudio": "bestvideo+bestaudio/best",
-  "1080p":  "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-  "720p":   "bestvideo[height<=720]+bestaudio/best[height<=720]",
-  "480p":   "bestvideo[height<=480]+bestaudio/best[height<=480]",
-  "360p":   "bestvideo[height<=360]+bestaudio/best[height<=360]",
+  // `bestvideo` (không *) bỏ format đã mux. TikTok thường chỉ có mp4 gộp + MP3 nhạc.
+  "bestvideo+bestaudio": `bestvideo*+${MERGE_AUDIO}/best[vcodec!=none]`,
+  "1080p":  `bestvideo*[height<=1080]+${MERGE_AUDIO}/best[height<=1080][vcodec!=none]`,
+  "720p":   `bestvideo*[height<=720]+${MERGE_AUDIO}/best[height<=720][vcodec!=none]`,
+  "480p":   `bestvideo*[height<=480]+${MERGE_AUDIO}/best[height<=480][vcodec!=none]`,
+  "360p":   `bestvideo*[height<=360]+${MERGE_AUDIO}/best[height<=360][vcodec!=none]`,
   "audio_mp3": "bestaudio/best",
   "audio_m4a": "bestaudio[ext=m4a]/bestaudio/best",
 };
+
+function isTikTokUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    return host === "tiktok.com" || host.endsWith(".tiktok.com") || host === "douyin.com" || host.endsWith(".douyin.com");
+  } catch {
+    return /tiktok\.com|douyin\.com/i.test(url);
+  }
+}
+
+/** Một file video đã mux — không +bestaudio để tránh tải nhầm MP3 nhạc gốc. */
+function muxedVideoFormat(height?: string): string {
+  const h = height ? `[height<=${height}]` : "";
+  return [
+    `best${h}[ext=mp4][vcodec!=none]`,
+    `best${h}[vcodec!=none][acodec!=none]`,
+    `bestvideo*${h}[vcodec!=none]+${MERGE_AUDIO}`,
+    `best${h}[vcodec!=none]`,
+  ].join("/");
+}
+
+export function formatSelector(quality: VideoQuality, url: string): string {
+  if (quality === "audio_mp3" || quality === "audio_m4a") {
+    return QUALITY_FORMAT[quality];
+  }
+  if (isTikTokUrl(url)) {
+    const height = quality === "bestvideo+bestaudio" ? undefined : quality.replace(/p$/, "");
+    return /^\d+$/.test(height ?? "") ? muxedVideoFormat(height) : muxedVideoFormat();
+  }
+  return QUALITY_FORMAT[quality] ?? `bestvideo*+${MERGE_AUDIO}/best[vcodec!=none]`;
+}
+
+const AUDIO_ONLY_EXT = new Set([".mp3", ".m4a", ".opus", ".ogg", ".wav", ".aac", ".weba"]);
+
+function isAudioOnlyFilename(name: string): boolean {
+  return AUDIO_ONLY_EXT.has(path.extname(name).toLowerCase());
+}
 
 export interface BuiltArgs {
   args: string[];
@@ -280,7 +321,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
     // người dùng gặp phải. Chỉ chọn các format đã ghép sẵn (progressive) từ
     // YouTube — đảm bảo luôn ra 1 file chơi được, dù chất lượng có thể thấp
     // hơn (YouTube thường giới hạn progressive ở mức 720p).
-    const heightMatch = QUALITY_FORMAT[req.quality]?.match(/height<=(\d+)/);
+    const heightMatch = formatSelector(req.quality, req.url)?.match(/height<=(\d+)/);
     const height = heightMatch ? heightMatch[1] : null;
     const progressiveFormat = height
       ? `best[height<=${height}][vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]`
@@ -299,7 +340,9 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
   return {
     args: [
       ...sharedFlags,
-      "-f", QUALITY_FORMAT[req.quality] ?? "bestvideo+bestaudio/best",
+      // Ưu tiên format có hình; tránh chọn track nhạc MP3 khi nguồn có cả video.
+      "--format-sort", "hasvid,res,vcodec:h264,ext:mp4:m4a",
+      "-f", formatSelector(req.quality, req.url),
       "--merge-output-format", "mp4",
       // Nguồn YouTube thường tách luồng hình (VP9/AV1, webm) và luồng tiếng
       // (Opus, webm). Mặc định yt-dlp ghép bằng "-c copy" (giữ nguyên codec)
@@ -370,17 +413,24 @@ function runAttempt(
     cancelToken.kill = () => proc.kill();
 
     let lastFilename = "";
+    let lastVideoFilename = "";
     let stdoutBuf    = "";
     let stderrBuf    = "";
+
+    const rememberFilename = (name: string) => {
+      const base = path.basename(name);
+      lastFilename = base;
+      if (!isAudioOnlyFilename(base)) lastVideoFilename = base;
+    };
 
     const consume = (text: string) => {
       for (const line of text.split(/\r?\n/)) {
         if (line.includes("[download] Destination:"))
-          lastFilename = path.basename(line.replace(/^.*\[download\] Destination:/, "").trim());
+          rememberFilename(line.replace(/^.*\[download\] Destination:/, "").trim());
 
         if (line.includes("[Merger] Merging formats into")) {
           const mm = line.match(/"([^"]+)"/);
-          if (mm) lastFilename = path.basename(mm[1]);
+          if (mm) rememberFilename(mm[1]);
         }
 
         const m = PROGRESS_RE.exec(line);
@@ -418,7 +468,13 @@ function runAttempt(
         return;
       }
       if (code === 0) {
-        resolve({ outcome: "complete", lastFilename, errorSummary: "", exitCode: 0, warning });
+        resolve({
+          outcome: "complete",
+          lastFilename: lastVideoFilename || lastFilename,
+          errorSummary: "",
+          exitCode: 0,
+          warning,
+        });
         return;
       }
 
@@ -495,6 +551,16 @@ export function startDownload(req: DownloadRequest): {
       if (cancelToken.cancelled || result.outcome === "cancelled") break;
 
       if (result.outcome === "complete") {
+        const wantedVideo = req.quality !== "audio_mp3" && req.quality !== "audio_m4a";
+        if (wantedVideo && result.lastFilename && isAudioOnlyFilename(result.lastFilename)) {
+          const message =
+            "Không tải được video — nguồn chỉ trả về file âm thanh (MP3/M4A). " +
+            "Thường gặp với TikTok dạng ảnh/slideshow, hoặc khi luồng hình bị chặn. " +
+            "Chọn “Chỉ âm thanh” nếu bạn muốn giữ file nhạc.";
+          logger.warn("downloader", message, { url: req.url, file: result.lastFilename });
+          emitter.emit("error", { id: req.id, message });
+          return;
+        }
         if (result.warning) logger.warn("downloader", result.warning, { url: req.url });
         emitter.emit("complete", {
           id:       req.id,
