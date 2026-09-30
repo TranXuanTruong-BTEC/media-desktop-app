@@ -1,7 +1,7 @@
-{
+﻿{
   "name": "media-desktop-app",
-  "version": "2.5.8",
-  "description": "Tải video/audio từ YouTube, TikTok, Facebook và 1000+ trang",
+  "version": "2.5.11",
+  "description": "Táº£i video/audio tá»« YouTube, TikTok, Facebook vÃ  1000+ trang",
   "author": "TranXuanTruong-BTEC",
   "private": true,
   "main": "dist-electron/main/main.js",

@@ -1,4 +1,4 @@
-name: Build & Release
+﻿name: Build & Release
 
 on:
   push:
@@ -92,16 +92,16 @@ jobs:
       - name: Build app
         run: npm run build
 
-      # CI là NƠI DUY NHẤT phát hành. electron-builder chỉ build (không tự upload)
-      # để tránh 2 nguồn cùng ghi đè lên release -> exe và latest.yml lệch nhau.
+      # CI lÃ  NÆ I DUY NHáº¤T phÃ¡t hÃ nh. electron-builder chá»‰ build (khÃ´ng tá»± upload)
+      # Ä‘á»ƒ trÃ¡nh 2 nguá»“n cÃ¹ng ghi Ä‘Ã¨ lÃªn release -> exe vÃ  latest.yml lá»‡ch nhau.
       - name: Build installer (.exe)
         run: npm run dist -- --publish never
 
-      # KHÔNG dựa vào electron-builder tự sinh latest.yml nữa (đã gặp trường hợp
-      # nó không sinh ra hoặc sinh lệch mà không rõ lý do trên máy CI thật).
-      # Tự tính sha512 + size từ CHÍNH file .exe vừa build ra và tự viết
-      # latest.yml — đảm bảo 2 file này KHÔNG THỂ lệch nhau, vì cùng lấy dữ liệu
-      # từ một nguồn duy nhất tại đây.
+      # KHÃ”NG dá»±a vÃ o electron-builder tá»± sinh latest.yml ná»¯a (Ä‘Ã£ gáº·p trÆ°á»ng há»£p
+      # nÃ³ khÃ´ng sinh ra hoáº·c sinh lá»‡ch mÃ  khÃ´ng rÃµ lÃ½ do trÃªn mÃ¡y CI tháº­t).
+      # Tá»± tÃ­nh sha512 + size tá»« CHÃNH file .exe vá»«a build ra vÃ  tá»± viáº¿t
+      # latest.yml â€” Ä‘áº£m báº£o 2 file nÃ y KHÃ”NG THá»‚ lá»‡ch nhau, vÃ¬ cÃ¹ng láº¥y dá»¯ liá»‡u
+      # tá»« má»™t nguá»“n duy nháº¥t táº¡i Ä‘Ã¢y.
       - name: Generate latest.yml from the built installer
         shell: powershell
         run: |
@@ -124,7 +124,7 @@ jobs:
           Write-Host "Da tao release/latest.yml cho $($exe.Name) ($($exe.Length) bytes)"
           Get-Content release/latest.yml
 
-      # Kiểm tra lại cho chắc: parse lại latest.yml vừa tạo và so sánh với file thật
+      # Kiá»ƒm tra láº¡i cho cháº¯c: parse láº¡i latest.yml vá»«a táº¡o vÃ  so sÃ¡nh vá»›i file tháº­t
       - name: Verify update metadata matches installer
         shell: powershell
         run: |
@@ -144,17 +144,17 @@ jobs:
             release/latest.yml
           retention-days: 30
 
-      # if: PHẢI có success() ở đầu — nếu không, bước này vẫn chạy dù bước
-      # trước lỗi (đây chính là lỗi khiến release v2.5.9 chỉ có .exe, thiếu
-      # latest.yml: bước kiểm tra lỗi nhưng bước tạo release vẫn cứ chạy).
+      # if: PHáº¢I cÃ³ success() á»Ÿ Ä‘áº§u â€” náº¿u khÃ´ng, bÆ°á»›c nÃ y váº«n cháº¡y dÃ¹ bÆ°á»›c
+      # trÆ°á»›c lá»—i (Ä‘Ã¢y chÃ­nh lÃ  lá»—i khiáº¿n release v2.5.9 chá»‰ cÃ³ .exe, thiáº¿u
+      # latest.yml: bÆ°á»›c kiá»ƒm tra lá»—i nhÆ°ng bÆ°á»›c táº¡o release váº«n cá»© cháº¡y).
       - name: Create GitHub Release
         if: success() && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          # Chỉ upload .exe + latest.yml tự tạo ở trên (đã đảm bảo khớp nhau).
-          # Bỏ .blockmap: có nó thì electron-updater tải phần chênh lệch, dễ vỡ
-          # nếu bản trước bị lỗi; không có thì tải nguyên file .exe, chậm hơn
-          # một chút nhưng chắc chắn không tái diễn lỗi checksum mismatch.
+          # Chá»‰ upload .exe + latest.yml tá»± táº¡o á»Ÿ trÃªn (Ä‘Ã£ Ä‘áº£m báº£o khá»›p nhau).
+          # Bá» .blockmap: cÃ³ nÃ³ thÃ¬ electron-updater táº£i pháº§n chÃªnh lá»‡ch, dá»… vá»¡
+          # náº¿u báº£n trÆ°á»›c bá»‹ lá»—i; khÃ´ng cÃ³ thÃ¬ táº£i nguyÃªn file .exe, cháº­m hÆ¡n
+          # má»™t chÃºt nhÆ°ng cháº¯c cháº¯n khÃ´ng tÃ¡i diá»…n lá»—i checksum mismatch.
           files: |
             release/*.exe
             release/latest.yml
