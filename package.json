@@ -1,6 +1,6 @@
 {
   "name": "media-desktop-app",
-  "version": "2.5.12",
+  "version": "2.5.13",
   "description": "Tải video/audio từ YouTube, TikTok, Facebook và 1000+ trang",
   "author": "TranXuanTruong-BTEC",
   "private": true,
@@ -48,7 +48,8 @@
     "files": [
       "dist-electron/**/*",
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "build/icon.ico"
     ],
     "extraResources": [
       {

@@ -1,5 +1,6 @@
 // src/renderer/src/components/Titlebar.tsx
 import React from "react";
+import appIcon from "../assets/icon.png";
 
 interface Props { activeCount: number; }
 
@@ -11,11 +12,7 @@ export function Titlebar({ activeCount }: Props) {
     >
       {/* Logo + title */}
       <div className="flex items-center gap-2">
-        <div className="w-5 h-5 rounded bg-accent flex items-center justify-center shrink-0">
-          <svg viewBox="0 0 16 16" fill="none" className="w-3 h-3">
-            <path d="M8 2v8M5 7l3 3 3-3M3 13h10" stroke="white" strokeWidth="1.6" strokeLinecap="round"/>
-          </svg>
-        </div>
+        <img src={appIcon} alt="" className="w-5 h-5 rounded-[5px] shrink-0" />
         <span className="text-text font-semibold text-[12px] tracking-wider uppercase">MediaGet</span>
         {activeCount > 0 && (
           <span className="text-[10px] bg-accent/20 text-accent px-1.5 py-0.5 rounded-full font-medium">
