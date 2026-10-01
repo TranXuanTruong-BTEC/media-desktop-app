@@ -1,5 +1,5 @@
 // src/renderer/src/App.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useDownload }         from "./hooks/useDownload";
 import { useUpdater }          from "./hooks/useUpdater";
 import { useYtdlpUpdater }     from "./hooks/useYtdlpUpdater";
@@ -9,23 +9,45 @@ import { StatusBar }           from "./components/StatusBar";
 import { Titlebar }            from "./components/Titlebar";
 import { UpdateDialog }        from "./components/UpdateDialog";
 import { YtdlpUpdateBanner }   from "./components/YtdlpUpdateBanner";
+import { Sidebar, NavId }      from "./components/Sidebar";
+import { SettingsPage }        from "./components/SettingsPage";
+import { AboutPage }           from "./components/AboutPage";
 import { VideoQuality }        from "../../shared/ipc-types";
+
+const SIDEBAR_KEY = "mediaget.sidebarCollapsed";
 
 export default function App() {
   const [outputDir, setOutputDir]   = useState("");
   const [appVersion, setAppVersion] = useState("");
+  const [nav, setNav]               = useState<NavId>("download");
+  const [collapsed, setCollapsed]   = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_KEY) === "1"; }
+    catch { return false; }
+  });
 
   const { items, addDownload, cancelDownload, removeItem, clearCompleted, selectOutputDir, stats } =
     useDownload(outputDir);
   const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
-  const { state: ytdlpState, forceUpdate, dismiss: dismissYtdlp } = useYtdlpUpdater();
+  const { state: ytdlpState, checkNow, forceUpdate, dismiss: dismissYtdlp } = useYtdlpUpdater();
+
+  const historyItems = useMemo(
+    () => items.filter(item => item.status === "done" || item.status === "error" || item.status === "cancelled"),
+    [items],
+  );
 
   useEffect(() => {
     window.api?.getDefaultDir?.().then(d => { if (d) setOutputDir(d); }).catch(() => {});
     (window as any).api?.getAppVersion?.().then((v: string) => { if (v) setAppVersion(v); }).catch(() => {});
-    // Tự động check update sau 2s khi mở app
     setTimeout(() => { (window as any).api?.checkForUpdate?.(); }, 2000);
   }, []);
+
+  function toggleCollapsed() {
+    setCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem(SIDEBAR_KEY, next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  }
 
   async function handleSelectDir() {
     const dir = await selectOutputDir();
@@ -34,6 +56,7 @@ export default function App() {
 
   function handleSubmit(url: string, quality: VideoQuality, dir: string) {
     addDownload(url, quality, dir);
+    setNav("download");
   }
 
   function handleOpenFolder(id: string) {
@@ -45,33 +68,85 @@ export default function App() {
     <div className="relative flex flex-col h-screen bg-[#0f1117] text-text overflow-hidden">
       <Titlebar activeCount={stats.active} />
 
-      <DownloadForm
-        outputDir={outputDir}
-        onOutputDirChange={setOutputDir}
-        onSelectDir={handleSelectDir}
-        onSubmit={handleSubmit}
-      />
+      <div className="flex flex-1 min-h-0">
+        <Sidebar
+          active={nav}
+          collapsed={collapsed}
+          onSelect={setNav}
+          onToggleCollapse={toggleCollapsed}
+          activeDownloads={stats.active}
+          historyCount={historyItems.length}
+        />
 
-      <YtdlpUpdateBanner
-        state={ytdlpState}
-        onForce={forceUpdate}
-        onDismiss={dismissYtdlp}
-      />
+        <div className="flex flex-col flex-1 min-w-0">
+          {nav === "download" && (
+            <>
+              <DownloadForm
+                outputDir={outputDir}
+                onOutputDirChange={setOutputDir}
+                onSelectDir={handleSelectDir}
+                onSubmit={handleSubmit}
+              />
+              <YtdlpUpdateBanner
+                state={ytdlpState}
+                onForce={forceUpdate}
+                onDismiss={dismissYtdlp}
+              />
+              <div className="flex-1 overflow-y-auto">
+                {items.length === 0 ? (
+                  <Empty />
+                ) : (
+                  items.map(item => (
+                    <DownloadItemRow
+                      key={item.id}
+                      item={item}
+                      onCancel={cancelDownload}
+                      onRemove={removeItem}
+                      onOpenFolder={handleOpenFolder}
+                    />
+                  ))
+                )}
+              </div>
+            </>
+          )}
 
-      <div className="flex-1 overflow-y-auto">
-        {items.length === 0 ? (
-          <Empty />
-        ) : (
-          items.map(item => (
-            <DownloadItemRow
-              key={item.id}
-              item={item}
-              onCancel={cancelDownload}
-              onRemove={removeItem}
-              onOpenFolder={handleOpenFolder}
+          {nav === "history" && (
+            <div className="flex-1 overflow-y-auto">
+              {historyItems.length === 0 ? (
+                <EmptyHistory />
+              ) : (
+                historyItems.map(item => (
+                  <DownloadItemRow
+                    key={item.id}
+                    item={item}
+                    onCancel={cancelDownload}
+                    onRemove={removeItem}
+                    onOpenFolder={handleOpenFolder}
+                  />
+                ))
+              )}
+            </div>
+          )}
+
+          {nav === "settings" && (
+            <SettingsPage
+              outputDir={outputDir}
+              onSelectDir={handleSelectDir}
+              ytdlpState={ytdlpState}
+              onCheckYtdlp={checkNow}
+              onForceYtdlp={forceUpdate}
+              updaterState={updaterState}
+              onCheckAppUpdate={() => (window as any).api?.checkForUpdate?.()}
+              version={appVersion}
             />
-          ))
-        )}
+          )}
+
+          {nav === "about" && <AboutPage version={appVersion} />}
+
+          {(nav === "convert" || nav === "trim" || nav === "compress" || nav === "audio") && (
+            <ComingSoon page={nav} />
+          )}
+        </div>
       </div>
 
       <StatusBar
@@ -83,7 +158,6 @@ export default function App() {
         onClearCompleted={clearCompleted}
       />
 
-      {/* Dialog overlay khi có bản cập nhật */}
       <UpdateDialog
         state={updaterState}
         currentVersion={appVersion}
@@ -112,6 +186,35 @@ function Empty() {
           <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-[#181c27] border border-[#252a38] text-muted">{s}</span>
         ))}
       </div>
+    </div>
+  );
+}
+
+function EmptyHistory() {
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-2 text-muted select-none">
+      <p className="text-[13px] text-subtle">Chưa có lịch sử tải</p>
+      <p className="text-[11px]">Các mục hoàn thành, lỗi hoặc đã hủy sẽ hiện ở đây</p>
+    </div>
+  );
+}
+
+const COMING_SOON: Record<"convert" | "trim" | "compress" | "audio", { title: string; desc: string }> = {
+  convert:  { title: "Chuyển đổi", desc: "Đổi định dạng video/audio (MP4, MKV, MP3, ...)" },
+  trim:     { title: "Cắt/Ghép",   desc: "Cắt đoạn video hoặc ghép nhiều file lại với nhau" },
+  compress: { title: "Nén file",   desc: "Giảm dung lượng video mà vẫn giữ chất lượng" },
+  audio:    { title: "Tách nhạc",  desc: "Tách phần âm thanh ra khỏi video" },
+};
+
+function ComingSoon({ page }: { page: keyof typeof COMING_SOON }) {
+  const { title, desc } = COMING_SOON[page];
+  return (
+    <div className="flex flex-col items-center justify-center flex-1 gap-2 text-muted select-none">
+      <p className="text-[15px] text-text font-semibold">{title}</p>
+      <p className="text-[12px] text-subtle">{desc}</p>
+      <span className="mt-2 text-[10px] px-2 py-0.5 rounded-full bg-[#181c27] border border-[#252a38]">
+        Đang phát triển
+      </span>
     </div>
   );
 }

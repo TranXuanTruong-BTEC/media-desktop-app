@@ -29,9 +29,9 @@ process.on("unhandledRejection", (reason) => {
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 900,
-    height: 620,
-    minWidth: 700,
+    width: 980,
+    height: 640,
+    minWidth: 780,
     minHeight: 500,
     frame: false,
     backgroundColor: "#0f1117",
@@ -62,6 +62,18 @@ function registerAppHandlers(win: BrowserWindow) {
     } catch (err) {
       // File có thể đã bị người dùng xóa/di chuyển sau khi tải xong.
       logger.warn("app:openPath", "Không mở được thư mục chứa file", { filePath, err });
+    }
+  });
+
+  ipcMain.handle("app:openExternal", async (_evt: unknown, url: string) => {
+    try {
+      const u = new URL(String(url));
+      if (u.protocol !== "https:") return false;   // chỉ mở link https
+      await shell.openExternal(u.toString());
+      return true;
+    } catch (err) {
+      logger.warn("app:openExternal", "Không mở được liên kết", { url, err });
+      return false;
     }
   });
 
