@@ -145,8 +145,8 @@ export function DownloadForm({ outputDir, onSelectDir, onSubmit }: Props) {
   return (
     <div className="bg-[#181c27] border-b border-[#252a38] p-3 shrink-0">
       <form onSubmit={handleSubmit}>
-        <div className="flex gap-2 mb-2">
-          <div className="flex-1 relative min-w-0">
+        <div className="flex flex-wrap gap-2 mb-2">
+          <div className="flex-1 relative min-w-[200px]">
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted">
               <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5">
                 <path d="M6.5 11.5l-2 2a2.83 2.83 0 01-4-4l2-2m7 1l2-2a2.83 2.83 0 00-4-4l-2 2m-1 4l4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
@@ -179,7 +179,7 @@ export function DownloadForm({ outputDir, onSelectDir, onSubmit }: Props) {
         </div>
 
         <div className="flex gap-2 items-center">
-          <div className="flex-1 flex items-center gap-2 h-7 px-3 bg-[#0f1117] border border-[#3a4258] rounded text-[11px] text-subtle overflow-hidden">
+          <div className="flex-1 min-w-0 flex items-center gap-2 h-7 px-3 bg-[#0f1117] border border-[#3a4258] rounded text-[11px] text-subtle overflow-hidden">
             <svg viewBox="0 0 16 16" fill="none" className="w-3 h-3 shrink-0 text-muted">
               <path d="M2 4a1 1 0 011-1h3l1.5 1.5H13a1 1 0 011 1V12a1 1 0 01-1 1H3a1 1 0 01-1-1V4z" stroke="currentColor" strokeWidth="1.3"/>
             </svg>
