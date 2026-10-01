@@ -35,6 +35,10 @@ export interface DownloadItem {
   warning?:  string;
   addedAt:   number;
   retryInfo?: RetryInfo;
+  /** Đường dẫn file cuối cùng (có khi đã xong) */
+  filepath?: string;
+  /** Khi tải nhiều luồng: "1/2", "2/2" */
+  stage?:    string;
 }
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -109,10 +113,12 @@ export function useDownload(defaultOutputDir: string) {
 
     const offProgress = window.api.onProgress((p: DownloadProgress) =>
       setItems(prev => prev.map(item =>
-        item.id === p.id
+        // Bỏ qua progress đến muộn của mục đã xong/lỗi/huỷ (tránh "sống lại" sau khi bấm Huỷ)
+        item.id === p.id && !TERMINAL.includes(item.status)
           ? {
               ...item,
               status:   "downloading",
+              stage:    p.stage,
               percent:  p.percent,
               speed:    p.speed,
               eta:      p.eta,
@@ -126,7 +132,7 @@ export function useDownload(defaultOutputDir: string) {
 
     const offRetrying = (window.api as any).onRetrying?.((r: DownloadRetrying) =>
       setItems(prev => prev.map(item =>
-        item.id === r.id
+        item.id === r.id && !TERMINAL.includes(item.status)
           ? {
               ...item,
               status:    "retrying",
@@ -148,7 +154,7 @@ export function useDownload(defaultOutputDir: string) {
       setItems(prev => prev.map(item =>
         item.id === c.id
           ? { ...item, status: "done", percent: 100, filename: c.filename || item.filename,
-              warning: c.warning, retryInfo: undefined }
+              filepath: c.filepath, stage: undefined, warning: c.warning, retryInfo: undefined }
           : item
       ))
     );

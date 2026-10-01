@@ -74,6 +74,16 @@ function RetryCountdown({ delayMs, startedAt }: { delayMs: number; startedAt: nu
 }
 
 export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Props) {
+  // Hiệu ứng xoá: thu gọn + mờ dần rồi mới gỡ khỏi danh sách.
+  // Dùng setTimeout (không phụ thuộc onAnimationEnd) để vẫn xoá được khi tắt animation.
+  const [leaving, setLeaving] = useState(false);
+  function handleRemove() {
+    if (leaving) return;
+    setLeaving(true);
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    window.setTimeout(() => onRemove(item.id), reduce ? 0 : 220);
+  }
+
   const isActive    = item.status === "downloading";
   const isRetrying  = item.status === "retrying";
   const isDone      = item.status === "done";
@@ -87,6 +97,8 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
     : (item.url.length > 70 ? item.url.slice(0, 67) + "…" : item.url);
 
   return (
+   <div className={`grid ${leaving ? "row-leave" : ""}`} style={{ gridTemplateRows: "1fr" }}>
+    <div className="min-h-0 overflow-hidden">
     <div
       className={`fade-in flex flex-col gap-1.5 px-3 py-2.5 border-b border-[#1e2333]
         hover:bg-white/[0.02] transition-colors
@@ -152,7 +164,7 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
           )}
           {(isDone || isError || isCancelled) && (
             <button
-              onClick={() => onRemove(item.id)}
+              onClick={handleRemove}
               title="Xóa khỏi danh sách"
               className="w-6 h-6 rounded hover:bg-white/10 flex items-center justify-center text-muted hover:text-subtle transition-colors"
             >
@@ -178,6 +190,7 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
           {item.eta && item.eta !== "Unknown" && (
             <span className="text-[10px] text-muted shrink-0">ETA {item.eta}</span>
           )}
+          {item.stage && <span className="text-[10px] text-muted shrink-0">Phần {item.stage}</span>}
           {item.size && <span className="text-[10px] text-muted shrink-0">{item.size}</span>}
         </div>
       )}
@@ -224,5 +237,7 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
         </div>
       )}
     </div>
+    </div>
+   </div>
   );
 }

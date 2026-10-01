@@ -40,6 +40,8 @@ export interface DownloadProgress {
   eta: string;
   filename: string;
   size: string;
+  /** Khi tải nhiều luồng (hình + tiếng): "1/2", "2/2". percent đã là tiến trình gộp. */
+  stage?: string;
 }
 
 export interface DownloadComplete {

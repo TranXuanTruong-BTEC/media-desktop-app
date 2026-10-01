@@ -65,7 +65,7 @@ export default function App() {
 
   function handleOpenFolder(id: string) {
     const item = items.find(i => i.id === id) ?? history.find(i => i.id === id);
-    if (item) (window as any).api?.openPath?.(item.outputDir);
+    if (item) (window as any).api?.openPath?.(item.filepath || item.outputDir);
   }
 
   return (

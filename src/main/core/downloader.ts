@@ -6,7 +6,7 @@
  */
 
 import { EventEmitter } from "events";
-import { spawn, ChildProcess, execSync } from "child_process";
+import { spawn, spawnSync, ChildProcess, execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import { app } from "electron";
@@ -73,11 +73,18 @@ const FATAL_PATTERNS = [
   /no video formats/i,
   /not a valid url/i,
   /unsupported url/i,
-  /404/,
+  /http error 404/i,
 ];
 
+// Chỉ phân loại dựa trên các dòng báo lỗi của yt-dlp. Trước đây quét TOÀN BỘ log
+// (gồm cả dòng tiến trình/tiêu đề video) nên chuỗi như "404.15MiB" hay tiêu đề có
+// chữ "copyright" bị nhận nhầm là lỗi nặng và không được thử lại.
+const ERROR_LINE_RE = /^\s*(ERROR|WARNING)\b|\[download\] Got error|HTTP Error/i;
+
 function classifyError(stderr: string, stdout: string): "network" | "fatal" {
-  const combined = stderr + stdout;
+  const all = stderr + "\n" + stdout;
+  const relevant = all.split(/\r?\n/).filter(l => ERROR_LINE_RE.test(l)).join("\n");
+  const combined = relevant || all;
   if (FATAL_PATTERNS.some(r => r.test(combined))) return "fatal";
   if (NETWORK_PATTERNS.some(r => r.test(combined))) return "network";
   return "fatal"; // unknown → không retry vô ích
@@ -360,9 +367,31 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
 
 // ─── Single attempt ───────────────────────────────────────────────────────────
 
+/**
+ * Dừng yt-dlp CÙNG các tiến trình con (ffmpeg, node...). proc.kill() trên Windows
+ * chỉ dừng yt-dlp.exe, ffmpeg đang ghép file có thể bị bỏ sót và chạy mồ côi.
+ * sync=true dùng khi thoát app (cần chắc chắn xong trước khi process main kết thúc).
+ */
+function killTree(proc: ChildProcess, sync = false): void {
+  const pid = proc.pid;
+  if (process.platform === "win32" && pid) {
+    const args = ["/pid", String(pid), "/T", "/F"];
+    try {
+      if (sync) {
+        spawnSync("taskkill", args, { windowsHide: true, timeout: 3000 });
+      } else {
+        spawn("taskkill", args, { windowsHide: true, stdio: "ignore" })
+          .on("error", () => { try { proc.kill(); } catch { /* ignore */ } });
+      }
+      return;
+    } catch { /* rơi xuống proc.kill() */ }
+  }
+  try { proc.kill(); } catch { /* ignore */ }
+}
+
 interface CancelToken {
   cancelled: boolean;
-  kill?: () => void;
+  kill?: (sync?: boolean) => void;
   delayTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -410,12 +439,15 @@ function runAttempt(
     }
 
     // Expose kill cho cancel()
-    cancelToken.kill = () => proc.kill();
+    cancelToken.kill = (sync?: boolean) => killTree(proc, sync);
 
     let lastFilename = "";
     let lastVideoFilename = "";
     let stdoutBuf    = "";
     let stderrBuf    = "";
+    // Tiến trình gộp: video + tiếng là 2 luồng tải riêng, mỗi luồng chạy 0→100%.
+    let totalStreams = 1;
+    let streamIdx    = 0;
 
     const rememberFilename = (name: string) => {
       const base = path.basename(name);
@@ -425,8 +457,27 @@ function runAttempt(
 
     const consume = (text: string) => {
       for (const line of text.split(/\r?\n/)) {
-        if (line.includes("[download] Destination:"))
+        // "[info] id: Downloading 1 format(s): 137+140" → 2 luồng
+        const fmt = line.match(/Downloading \d+ format\(s\):\s*(\S+)/);
+        if (fmt) totalStreams = Math.max(1, fmt[1].split("+").length);
+
+        if (line.includes("[download] Destination:")) {
+          streamIdx++;
           rememberFilename(line.replace(/^.*\[download\] Destination:/, "").trim());
+        }
+
+        // File đã có sẵn từ trước (resume / tải lại): không có dòng Destination
+        const already = line.match(/^\[download\]\s+(.+?)\s+has already been downloaded/);
+        if (already) {
+          streamIdx++;
+          rememberFilename(already[1]);
+        }
+
+        // MP3/M4A: tên cuối cùng nằm ở bước ExtractAudio, không phải bước download
+        const extract = line.match(/^\[ExtractAudio\] Destination:\s*(.+)$/);
+        if (extract) rememberFilename(extract[1].trim());
+        const notConv = line.match(/^\[ExtractAudio\] Not converting audio (.+?); file is already in target format/);
+        if (notConv) rememberFilename(notConv[1].trim());
 
         if (line.includes("[Merger] Merging formats into")) {
           const mm = line.match(/"([^"]+)"/);
@@ -435,13 +486,17 @@ function runAttempt(
 
         const m = PROGRESS_RE.exec(line);
         if (m) {
+          const pct = parseFloat(m[1]);
+          const idx = Math.min(Math.max(streamIdx, 1), totalStreams);
+          const overall = totalStreams > 1 ? ((idx - 1 + pct / 100) / totalStreams) * 100 : pct;
           onProgress({
             id: req.id,
-            percent:  parseFloat(m[1]),
+            percent:  overall,
             size:     m[2],
             speed:    m[3],
             eta:      m[4],
             filename: lastFilename,
+            stage:    totalStreams > 1 ? `${idx}/${totalStreams}` : undefined,
           });
         }
       }
@@ -508,7 +563,7 @@ function runAttempt(
  */
 export function startDownload(req: DownloadRequest): {
   emitter: Downloader;
-  cancel:  () => void;
+  cancel:  (sync?: boolean) => void;
 } {
   const emitter = new EventEmitter() as Downloader;
 
@@ -536,17 +591,25 @@ export function startDownload(req: DownloadRequest): {
 
   const cancelToken: CancelToken = { cancelled: false };
 
-  const cancel = () => {
+  const cancel = (sync = false) => {
     cancelToken.cancelled = true;
-    cancelToken.kill?.();
+    cancelToken.kill?.(sync);
     if (cancelToken.delayTimer) clearTimeout(cancelToken.delayTimer);
+  };
+
+  // Tiến trình chỉ được tăng (không chạy lùi khi chuyển luồng / retry)
+  let maxPercent = 0;
+  const emitProgress = (p: DownloadProgress) => {
+    if (p.percent < maxPercent) p = { ...p, percent: maxPercent };
+    else maxPercent = p.percent;
+    emitter.emit("progress", p);
   };
 
   (async () => {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       if (cancelToken.cancelled) break;
 
-      const result = await runAttempt(req, ytDlp, p => emitter.emit("progress", p), cancelToken);
+      const result = await runAttempt(req, ytDlp, emitProgress, cancelToken);
 
       if (cancelToken.cancelled || result.outcome === "cancelled") break;
 

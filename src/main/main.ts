@@ -1,6 +1,7 @@
 // src/main/main.ts
 import { app, BrowserWindow, ipcMain, shell, dialog } from "electron";
 import path from "path";
+import fs from "fs";
 import { registerDownloadHandlers }     from "./ipc/download.js";
 import { registerUpdaterHandlers }      from "./ipc/updater.js";
 import { registerYtdlpUpdaterHandlers } from "./ipc/ytdlp-update.js";
@@ -55,10 +56,17 @@ function createWindow(): BrowserWindow {
 function registerAppHandlers(win: BrowserWindow) {
   ipcMain.handle("app:getDefaultDir", () => app.getPath("downloads"));
   ipcMain.handle("app:getVersion",    () => app.getVersion());
+  // Nhận đường dẫn FILE → mở Explorer và chọn sẵn file; nhận THƯ MỤC → mở thư mục;
+  // file đã bị xoá/di chuyển → mở thư mục chứa nó (nếu còn).
   ipcMain.handle("app:openPath", async (_evt: unknown, filePath: string) => {
     try {
       if (typeof filePath !== "string" || !filePath) return;
-      await shell.showItemInFolder(filePath);
+      let stat: fs.Stats | null = null;
+      try { stat = fs.statSync(filePath); } catch { /* không tồn tại */ }
+      if (stat?.isFile()) { shell.showItemInFolder(filePath); return; }
+      if (stat?.isDirectory()) { await shell.openPath(filePath); return; }
+      const parent = path.dirname(filePath);
+      if (fs.existsSync(parent)) await shell.openPath(parent);
     } catch (err) {
       // File có thể đã bị người dùng xóa/di chuyển sau khi tải xong.
       logger.warn("app:openPath", "Không mở được thư mục chứa file", { filePath, err });
