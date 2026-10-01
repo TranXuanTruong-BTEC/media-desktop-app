@@ -7,6 +7,8 @@ interface Props {
   onOutputDirChange: (dir: string) => void;
   onSelectDir: () => void;
   onSubmit: (url: string, quality: VideoQuality, outputDir: string) => void;
+  /** Tăng giá trị này để xoá ô nhập link (App chỉ xoá khi link thực sự được nhận) */
+  clearKey?: number;
 }
 
 interface QualityOption {
@@ -126,10 +128,12 @@ function QualitySelect({
   );
 }
 
-export function DownloadForm({ outputDir, onSelectDir, onSubmit }: Props) {
+export function DownloadForm({ outputDir, onSelectDir, onSubmit, clearKey }: Props) {
   const [url, setUrl] = useState("");
   const [quality, setQuality] = useState<VideoQuality>("bestvideo+bestaudio");
   const [error, setError] = useState("");
+
+  useEffect(() => { if (clearKey) setUrl(""); }, [clearKey]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -139,7 +143,6 @@ export function DownloadForm({ outputDir, onSelectDir, onSubmit }: Props) {
     if (!outputDir) { setError("Vui lòng chọn thư mục lưu"); return; }
     setError("");
     onSubmit(trimmed, quality, outputDir);
-    setUrl("");
   }
 
   return (

@@ -6,6 +6,7 @@ interface Props {
   item:         DownloadItem;
   onCancel:     (id: string) => void;
   onRemove:     (id: string) => void;
+  onRetry:      (id: string) => void;
   onOpenFolder: (id: string) => void;
 }
 
@@ -73,7 +74,7 @@ function RetryCountdown({ delayMs, startedAt }: { delayMs: number; startedAt: nu
   return <span className="text-[10px] text-[#f59e0b] shrink-0">({remaining}s)</span>;
 }
 
-export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Props) {
+export function DownloadItemRow({ item, onCancel, onRemove, onRetry, onOpenFolder }: Props) {
   // Hiệu ứng xoá: thu gọn + mờ dần rồi mới gỡ khỏi danh sách.
   // Dùng setTimeout (không phụ thuộc onAnimationEnd) để vẫn xoá được khi tắt animation.
   const [leaving, setLeaving] = useState(false);
@@ -84,13 +85,14 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
     window.setTimeout(() => onRemove(item.id), reduce ? 0 : 220);
   }
 
+  const isQueued    = item.status === "queued";
   const isActive    = item.status === "downloading";
   const isRetrying  = item.status === "retrying";
   const isDone      = item.status === "done";
   const isError     = item.status === "error";
   const isCancelled = item.status === "cancelled";
 
-  const accent = isRetrying ? "#f59e0b" : isError ? "#ef4444" : isDone ? "#22c55e" : "#3b82f6";
+  const accent = isQueued ? "#94a3b8" : isRetrying ? "#f59e0b" : isError ? "#ef4444" : isDone ? "#22c55e" : "#3b82f6";
 
   const displayName = item.filename
     ? (item.filename.length > 70 ? item.filename.slice(0, 67) + "…" : item.filename)
@@ -140,7 +142,7 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
 
         {/* Actions */}
         <div className="flex items-center gap-1 shrink-0">
-          {(isActive || isRetrying) && (
+          {(isActive || isRetrying || isQueued) && (
             <button
               onClick={() => onCancel(item.id)}
               title="Hủy"
@@ -159,6 +161,17 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
             >
               <svg viewBox="0 0 16 16" fill="none" className="w-3 h-3">
                 <path d="M2 4a1 1 0 011-1h3l1.5 1.5H13a1 1 0 011 1V12a1 1 0 01-1 1H3a1 1 0 01-1-1V4z" stroke="currentColor" strokeWidth="1.3"/>
+              </svg>
+            </button>
+          )}
+          {(isError || isCancelled) && (
+            <button
+              onClick={() => onRetry(item.id)}
+              title="Thử lại"
+              className="w-6 h-6 rounded hover:bg-accent/20 flex items-center justify-center text-muted hover:text-accent transition-colors"
+            >
+              <svg viewBox="0 0 16 16" fill="none" className="w-3 h-3">
+                <path d="M13 8a5 5 0 11-1.6-3.7M13 2.5V5h-2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
           )}
@@ -193,6 +206,11 @@ export function DownloadItemRow({ item, onCancel, onRemove, onOpenFolder }: Prop
           {item.stage && <span className="text-[10px] text-muted shrink-0">Phần {item.stage}</span>}
           {item.size && <span className="text-[10px] text-muted shrink-0">{item.size}</span>}
         </div>
+      )}
+
+      {/* Row 2: queued */}
+      {isQueued && (
+        <div className="pl-8 text-[11px] text-muted">Đang chờ đến lượt…</div>
       )}
 
       {/* Row 2: retrying — amber bar + countdown */}

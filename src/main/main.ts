@@ -91,16 +91,33 @@ function registerAppHandlers(win: BrowserWindow) {
   ipcMain.on("win:close",    () => win.close());
 }
 
-app.whenReady().then(() => {
-  const win = createWindow();
-  registerDownloadHandlers(win);
-  registerUpdaterHandlers(win);
-  registerYtdlpUpdaterHandlers(win);
-  registerAppHandlers(win);
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+// Chỉ cho chạy MỘT cửa sổ app: mở lần 2 thì đưa cửa sổ cũ lên thay vì tạo cửa sổ mới
+// (2 cửa sổ cùng tải về 1 thư mục và cùng ghi lịch sử/log sẽ đè lẫn nhau).
+const gotSingleLock = app.requestSingleInstanceLock();
+
+if (!gotSingleLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const existing = BrowserWindow.getAllWindows()[0];
+    if (existing) {
+      if (existing.isMinimized()) existing.restore();
+      existing.show();
+      existing.focus();
+    }
   });
-});
+
+  app.whenReady().then(() => {
+    const win = createWindow();
+    registerDownloadHandlers(win);
+    registerUpdaterHandlers(win);
+    registerYtdlpUpdaterHandlers(win);
+    registerAppHandlers(win);
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

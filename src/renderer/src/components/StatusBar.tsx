@@ -2,17 +2,19 @@
 interface Props {
   total: number;
   active: number;
+  queued?: number;
   done: number;
   failed: number;
   version: string;
   onClearCompleted: () => void;
 }
 
-export function StatusBar({ total, active, done, failed, version, onClearCompleted }: Props) {
+export function StatusBar({ total, active, queued = 0, done, failed, version, onClearCompleted }: Props) {
   return (
     <div className="h-6 flex items-center justify-between px-3 bg-[#0a0d14] border-t border-[#1e2333] shrink-0 text-[10px] text-muted">
       <div className="flex items-center gap-3">
         {active > 0 && <span className="text-accent">● {active} đang tải</span>}
+        {queued > 0 && <span className="text-subtle">◔ {queued} đang chờ</span>}
         {done   > 0 && <span className="text-success">✓ {done} hoàn thành</span>}
         {failed > 0 && <span className="text-danger">✗ {failed} lỗi</span>}
         {total  === 0 && <span>Sẵn sàng</span>}

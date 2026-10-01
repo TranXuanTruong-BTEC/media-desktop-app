@@ -12,21 +12,33 @@ import { YtdlpUpdateBanner }   from "./components/YtdlpUpdateBanner";
 import { Sidebar, NavId }      from "./components/Sidebar";
 import { SettingsPage }        from "./components/SettingsPage";
 import { AboutPage }           from "./components/AboutPage";
+import { ConfirmDialog }       from "./components/ConfirmDialog";
 import { VideoQuality }        from "../../shared/ipc-types";
 
 const SIDEBAR_KEY = "mediaget.sidebarCollapsed";
+
+interface DialogState {
+  title:        string;
+  message:      string;
+  confirmText?: string;
+  cancelText?:  string | null;
+  danger?:      boolean;
+  onConfirm:    () => void;
+}
 
 export default function App() {
   const [outputDir, setOutputDir]   = useState("");
   const [appVersion, setAppVersion] = useState("");
   const [nav, setNav]               = useState<NavId>("download");
+  const [dialog, setDialog]         = useState<DialogState | null>(null);
+  const [clearKey, setClearKey]     = useState(0);
   const [collapsed, setCollapsed]   = useState(() => {
     try { return localStorage.getItem(SIDEBAR_KEY) === "1"; }
     catch { return false; }
   });
 
   const {
-    items, history, addDownload, cancelDownload, removeItem, clearCompleted,
+    items, history, addDownload, cancelDownload, retryDownload, removeItem, clearCompleted,
     removeHistory, clearHistory, findDuplicate, selectOutputDir, stats,
   } = useDownload(outputDir);
   const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
@@ -51,15 +63,42 @@ export default function App() {
     if (dir) setOutputDir(dir);
   }
 
+  function startNew(url: string, quality: VideoQuality, dir: string) {
+    addDownload(url, quality, dir);
+    setClearKey(k => k + 1);   // chỉ xoá ô nhập khi link thực sự được nhận
+    setNav("download");
+  }
+
   function handleSubmit(url: string, quality: VideoQuality, dir: string) {
     const dup = findDuplicate(url);
-    if (dup) {
-      const ok = window.confirm(
-        `Link này đã được tải trước đó${dup.filename ? ` (${dup.filename})` : ""}.\n\nBạn vẫn muốn tải lại?`
-      );
-      if (!ok) return;
+
+    if (dup?.state === "active") {
+      setDialog({
+        title: "Link đang được tải",
+        message: "Link này đang tải hoặc đang chờ trong hàng đợi.",
+        confirmText: "Đã hiểu",
+        cancelText: null,
+        onConfirm: () => setDialog(null),
+      });
+      return;
     }
-    addDownload(url, quality, dir);
+
+    if (dup?.state === "done") {
+      setDialog({
+        title: "Link đã tải trước đó",
+        message: `Link này đã được tải xong trước đây${dup.item.filename ? `:\n${dup.item.filename}` : "."}\n\nBạn vẫn muốn tải lại?`,
+        confirmText: "Tải lại",
+        cancelText: "Không",
+        onConfirm: () => { setDialog(null); startNew(url, quality, dir); },
+      });
+      return;
+    }
+
+    startNew(url, quality, dir);
+  }
+
+  function handleRetry(id: string) {
+    retryDownload(id);
     setNav("download");
   }
 
@@ -90,6 +129,7 @@ export default function App() {
                 onOutputDirChange={setOutputDir}
                 onSelectDir={handleSelectDir}
                 onSubmit={handleSubmit}
+                clearKey={clearKey}
               />
               <YtdlpUpdateBanner
                 state={ytdlpState}
@@ -106,6 +146,7 @@ export default function App() {
                       item={item}
                       onCancel={cancelDownload}
                       onRemove={removeItem}
+                      onRetry={handleRetry}
                       onOpenFolder={handleOpenFolder}
                     />
                   ))
@@ -120,7 +161,14 @@ export default function App() {
                 <div className="flex items-center justify-between px-4 py-2 border-b border-[#1e2333] text-[11px] text-muted shrink-0">
                   <span>{history.length} mục đã lưu — dùng để phát hiện link trùng</span>
                   <button
-                    onClick={() => { if (window.confirm("Xoá toàn bộ lịch sử tải?")) clearHistory(); }}
+                    onClick={() => setDialog({
+                      title: "Xoá toàn bộ lịch sử?",
+                      message: "Sau khi xoá, app sẽ không còn nhận ra các link đã tải để cảnh báo trùng.",
+                      confirmText: "Xoá lịch sử",
+                      cancelText: "Huỷ",
+                      danger: true,
+                      onConfirm: () => { clearHistory(); setDialog(null); },
+                    })}
                     className="hover:text-danger transition-colors"
                   >
                     Xoá lịch sử
@@ -137,6 +185,7 @@ export default function App() {
                       item={item}
                       onCancel={cancelDownload}
                       onRemove={removeHistory}
+                      onRetry={handleRetry}
                       onOpenFolder={handleOpenFolder}
                     />
                   ))
@@ -169,10 +218,22 @@ export default function App() {
       <StatusBar
         total={stats.total}
         active={stats.active}
+        queued={stats.queued}
         done={stats.done}
         failed={stats.failed}
         version={appVersion}
         onClearCompleted={clearCompleted}
+      />
+
+      <ConfirmDialog
+        open={!!dialog}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        confirmText={dialog?.confirmText}
+        cancelText={dialog?.cancelText}
+        danger={dialog?.danger}
+        onConfirm={() => dialog?.onConfirm()}
+        onCancel={() => setDialog(null)}
       />
 
       <UpdateDialog
