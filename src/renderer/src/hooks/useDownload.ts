@@ -1,5 +1,5 @@
 // src/renderer/src/hooks/useDownload.ts
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   DownloadRequest,
   DownloadProgress,
@@ -39,8 +39,70 @@ export interface DownloadItem {
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
+// ── Lịch sử tải (lưu bền vững, độc lập với hàng đợi) ─────────────────────────
+const HISTORY_KEY = "mediaget.history.v1";
+const HISTORY_MAX = 1000;
+
+const TERMINAL: DownloadStatus[] = ["done", "error", "cancelled"];
+
+function loadHistory(): DownloadItem[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+function saveHistory(list: DownloadItem[]) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX))); }
+  catch { /* ignore quota / private mode */ }
+}
+
+/** Chuẩn hoá URL để so sánh trùng (YouTube watch?v= / youtu.be / shorts → cùng 1 khoá) */
+export function normalizeUrl(raw: string): string {
+  const url = raw.trim();
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "").replace(/^m\./, "");
+    if (host === "youtu.be") return `youtube:${u.pathname.slice(1)}`;
+    if (host.endsWith("youtube.com")) {
+      const v = u.searchParams.get("v");
+      if (v) return `youtube:${v}`;
+      const m = u.pathname.match(/^\/(shorts|embed|live)\/([\w-]+)/);
+      if (m) return `youtube:${m[2]}`;
+    }
+    return `${host}${u.pathname.replace(/\/+$/, "")}${u.search}`.toLowerCase();
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
 export function useDownload(defaultOutputDir: string) {
   const [items, setItems] = useState<DownloadItem[]>([]);
+  const [history, setHistory] = useState<DownloadItem[]>(loadHistory);
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  // Mỗi khi 1 mục kết thúc (xong/lỗi/huỷ) → ghi vào lịch sử (upsert theo id).
+  // Xoá mục khỏi hàng đợi KHÔNG ảnh hưởng lịch sử.
+  useEffect(() => {
+    const finished = items.filter(i => TERMINAL.includes(i.status));
+    if (finished.length === 0) return;
+    setHistory(prev => {
+      let changed = false;
+      const next = [...prev];
+      for (const it of finished) {
+        const idx = next.findIndex(h => h.id === it.id);
+        if (idx === -1) { next.unshift(it); changed = true; }
+        else if (next[idx].status !== it.status || next[idx].filename !== it.filename) {
+          next[idx] = it; changed = true;
+        }
+      }
+      if (!changed) return prev;
+      saveHistory(next);
+      return next;
+    });
+  }, [items]);
 
   useEffect(() => {
     if (!window.api) return;
@@ -138,6 +200,20 @@ export function useDownload(defaultOutputDir: string) {
     ));
   }, []);
 
+  const removeHistory = useCallback((id: string) => {
+    setHistory(prev => { const next = prev.filter(h => h.id !== id); saveHistory(next); return next; });
+  }, []);
+
+  const clearHistory = useCallback(() => {
+    setHistory([]); saveHistory([]);
+  }, []);
+
+  /** Trả về mục đã tải THÀNH CÔNG trước đó với cùng URL (nếu có) */
+  const findDuplicate = useCallback((url: string): DownloadItem | undefined => {
+    const key = normalizeUrl(url);
+    return historyRef.current.find(h => h.status === "done" && normalizeUrl(h.url) === key);
+  }, []);
+
   const selectOutputDir = useCallback(async () => {
     return (await window.api?.selectOutputDir()) ?? null;
   }, []);
@@ -149,5 +225,8 @@ export function useDownload(defaultOutputDir: string) {
     failed:  items.filter(i => i.status === "error").length,
   };
 
-  return { items, addDownload, cancelDownload, removeItem, clearCompleted, selectOutputDir, stats };
+  return {
+    items, history, addDownload, cancelDownload, removeItem, clearCompleted,
+    removeHistory, clearHistory, findDuplicate, selectOutputDir, stats,
+  };
 }

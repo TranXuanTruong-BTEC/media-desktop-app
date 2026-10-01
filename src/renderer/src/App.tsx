@@ -1,5 +1,5 @@
 // src/renderer/src/App.tsx
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useDownload }         from "./hooks/useDownload";
 import { useUpdater }          from "./hooks/useUpdater";
 import { useYtdlpUpdater }     from "./hooks/useYtdlpUpdater";
@@ -25,15 +25,12 @@ export default function App() {
     catch { return false; }
   });
 
-  const { items, addDownload, cancelDownload, removeItem, clearCompleted, selectOutputDir, stats } =
-    useDownload(outputDir);
+  const {
+    items, history, addDownload, cancelDownload, removeItem, clearCompleted,
+    removeHistory, clearHistory, findDuplicate, selectOutputDir, stats,
+  } = useDownload(outputDir);
   const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
   const { state: ytdlpState, checkNow, forceUpdate, dismiss: dismissYtdlp } = useYtdlpUpdater();
-
-  const historyItems = useMemo(
-    () => items.filter(item => item.status === "done" || item.status === "error" || item.status === "cancelled"),
-    [items],
-  );
 
   useEffect(() => {
     window.api?.getDefaultDir?.().then(d => { if (d) setOutputDir(d); }).catch(() => {});
@@ -55,12 +52,19 @@ export default function App() {
   }
 
   function handleSubmit(url: string, quality: VideoQuality, dir: string) {
+    const dup = findDuplicate(url);
+    if (dup) {
+      const ok = window.confirm(
+        `Link này đã được tải trước đó${dup.filename ? ` (${dup.filename})` : ""}.\n\nBạn vẫn muốn tải lại?`
+      );
+      if (!ok) return;
+    }
     addDownload(url, quality, dir);
     setNav("download");
   }
 
   function handleOpenFolder(id: string) {
-    const item = items.find(i => i.id === id);
+    const item = items.find(i => i.id === id) ?? history.find(i => i.id === id);
     if (item) (window as any).api?.openPath?.(item.outputDir);
   }
 
@@ -75,7 +79,7 @@ export default function App() {
           onSelect={setNav}
           onToggleCollapse={toggleCollapsed}
           activeDownloads={stats.active}
-          historyCount={historyItems.length}
+          historyCount={history.length}
         />
 
         <div className="flex flex-col flex-1 min-w-0">
@@ -111,20 +115,33 @@ export default function App() {
           )}
 
           {nav === "history" && (
-            <div className="flex-1 overflow-y-auto">
-              {historyItems.length === 0 ? (
-                <EmptyHistory />
-              ) : (
-                historyItems.map(item => (
-                  <DownloadItemRow
-                    key={item.id}
-                    item={item}
-                    onCancel={cancelDownload}
-                    onRemove={removeItem}
-                    onOpenFolder={handleOpenFolder}
-                  />
-                ))
+            <div className="flex-1 flex flex-col min-h-0">
+              {history.length > 0 && (
+                <div className="flex items-center justify-between px-4 py-2 border-b border-[#1e2333] text-[11px] text-muted shrink-0">
+                  <span>{history.length} mục đã lưu — dùng để phát hiện link trùng</span>
+                  <button
+                    onClick={() => { if (window.confirm("Xoá toàn bộ lịch sử tải?")) clearHistory(); }}
+                    className="hover:text-danger transition-colors"
+                  >
+                    Xoá lịch sử
+                  </button>
+                </div>
               )}
+              <div className="flex-1 overflow-y-auto">
+                {history.length === 0 ? (
+                  <EmptyHistory />
+                ) : (
+                  history.map(item => (
+                    <DownloadItemRow
+                      key={item.id}
+                      item={item}
+                      onCancel={cancelDownload}
+                      onRemove={removeHistory}
+                      onOpenFolder={handleOpenFolder}
+                    />
+                  ))
+                )}
+              </div>
             </div>
           )}
 
