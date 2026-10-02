@@ -1,11 +1,12 @@
 // src/main/main.ts
-import { app, BrowserWindow, ipcMain, shell, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, shell, dialog, session } from "electron";
 import path from "path";
 import fs from "fs";
 import { registerDownloadHandlers }     from "./ipc/download.js";
 import { registerUpdaterHandlers }      from "./ipc/updater.js";
 import { registerYtdlpUpdaterHandlers } from "./ipc/ytdlp-update.js";
 import { logger } from "./core/logger.js";
+import { isTrustedSender, DEV_ORIGIN } from "./ipc/guard.js";
 
 const isDev = !app.isPackaged;
 
@@ -28,6 +29,19 @@ process.on("unhandledRejection", (reason) => {
   logger.error("main", "unhandledRejection", reason);
 });
 
+/** Mở link https bằng trình duyệt mặc định; mọi scheme khác (file:, javascript:, ms-*:, ...) bị bỏ. */
+function openHttpsExternally(raw: string): boolean {
+  try {
+    if (typeof raw !== "string" || raw.length > 2048) return false;
+    const u = new URL(raw);
+    if (u.protocol !== "https:" || u.username || u.password) return false;
+    void shell.openExternal(u.toString());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 980,
@@ -41,11 +55,29 @@ function createWindow(): BrowserWindow {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,                       // renderer chạy trong sandbox của Chromium
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      webviewTag: false,
     },
   });
 
+  // Khoá điều hướng: renderer chỉ được ở trang của app. Link ra ngoài (target=_blank,
+  // window.open, kéo-thả file vào cửa sổ...) bị chặn; riêng https thì mở bằng trình duyệt
+  // hệ thống. Nếu không, trang bên ngoài có thể được mở trong cửa sổ có preload `window.api`.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openHttpsExternally(url);
+    return { action: "deny" };
+  });
+  const blockNavigation = (e: Electron.Event, url: string) => {
+    e.preventDefault();
+    openHttpsExternally(url);
+  };
+  win.webContents.on("will-navigate", blockNavigation);
+  win.webContents.on("will-redirect", blockNavigation);
+
   const loadPromise = isDev
-    ? win.loadURL("http://localhost:5173")
+    ? win.loadURL(DEV_ORIGIN)
     : win.loadFile(path.join(__dirname, "../../dist/renderer/index.html"));
 
   loadPromise.catch((err) => logger.error("main", "Không load được cửa sổ chính", err));
@@ -54,13 +86,19 @@ function createWindow(): BrowserWindow {
 }
 
 function registerAppHandlers(win: BrowserWindow) {
-  ipcMain.handle("app:getDefaultDir", () => app.getPath("downloads"));
-  ipcMain.handle("app:getVersion",    () => app.getVersion());
+  ipcMain.handle("app:getDefaultDir", (evt) =>
+    isTrustedSender(evt, win, "app:getDefaultDir") ? app.getPath("downloads") : null);
+  ipcMain.handle("app:getVersion", (evt) =>
+    isTrustedSender(evt, win, "app:getVersion") ? app.getVersion() : null);
+
   // Nhận đường dẫn FILE → mở Explorer và chọn sẵn file; nhận THƯ MỤC → mở thư mục;
   // file đã bị xoá/di chuyển → mở thư mục chứa nó (nếu còn).
-  ipcMain.handle("app:openPath", async (_evt: unknown, filePath: string) => {
+  // KHÔNG bao giờ thực thi file: chỉ "show in folder" / mở thư mục.
+  ipcMain.handle("app:openPath", async (evt, filePath: unknown) => {
+    if (!isTrustedSender(evt, win, "app:openPath")) return;
     try {
-      if (typeof filePath !== "string" || !filePath) return;
+      if (typeof filePath !== "string" || !filePath || filePath.length > 1024) return;
+      if (filePath.includes("\0") || !path.isAbsolute(filePath)) return;
       let stat: fs.Stats | null = null;
       try { stat = fs.statSync(filePath); } catch { /* không tồn tại */ }
       if (stat?.isFile()) { shell.showItemInFolder(filePath); return; }
@@ -69,26 +107,22 @@ function registerAppHandlers(win: BrowserWindow) {
       if (fs.existsSync(parent)) await shell.openPath(parent);
     } catch (err) {
       // File có thể đã bị người dùng xóa/di chuyển sau khi tải xong.
-      logger.warn("app:openPath", "Không mở được thư mục chứa file", { filePath, err });
+      logger.warn("app:openPath", "Không mở được thư mục chứa file", { err });
     }
   });
 
-  ipcMain.handle("app:openExternal", async (_evt: unknown, url: string) => {
-    try {
-      const u = new URL(String(url));
-      if (u.protocol !== "https:") return false;   // chỉ mở link https
-      await shell.openExternal(u.toString());
-      return true;
-    } catch (err) {
-      logger.warn("app:openExternal", "Không mở được liên kết", { url, err });
-      return false;
-    }
+  ipcMain.handle("app:openExternal", (evt, url: unknown) => {
+    if (!isTrustedSender(evt, win, "app:openExternal")) return false;
+    return typeof url === "string" ? openHttpsExternally(url) : false;   // chỉ mở link https
   });
 
   // Custom window controls
-  ipcMain.on("win:minimize", () => win.minimize());
-  ipcMain.on("win:maximize", () => win.isMaximized() ? win.unmaximize() : win.maximize());
-  ipcMain.on("win:close",    () => win.close());
+  ipcMain.on("win:minimize", (evt) => { if (isTrustedSender(evt, win, "win:minimize")) win.minimize(); });
+  ipcMain.on("win:maximize", (evt) => {
+    if (!isTrustedSender(evt, win, "win:maximize")) return;
+    if (win.isMaximized()) win.unmaximize(); else win.maximize();
+  });
+  ipcMain.on("win:close",    (evt) => { if (isTrustedSender(evt, win, "win:close")) win.close(); });
 }
 
 // Chỉ cho chạy MỘT cửa sổ app: mở lần 2 thì đưa cửa sổ cũ lên thay vì tạo cửa sổ mới
@@ -107,7 +141,16 @@ if (!gotSingleLock) {
     }
   });
 
+  // Không bao giờ gắn <webview>
+  app.on("web-contents-created", (_e, contents) => {
+    contents.on("will-attach-webview", (ev) => ev.preventDefault());
+  });
+
   app.whenReady().then(() => {
+    // App không cần quyền camera/mic/vị trí/thông báo... → từ chối mọi yêu cầu quyền
+    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+    session.defaultSession.setPermissionCheckHandler(() => false);
+
     const win = createWindow();
     registerDownloadHandlers(win);
     registerUpdaterHandlers(win);

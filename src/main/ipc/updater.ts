@@ -2,6 +2,7 @@
 import { ipcMain, BrowserWindow, app } from "electron";
 import { autoUpdater, UpdateInfo } from "electron-updater";
 import { logger } from "../core/logger.js";
+import { isTrustedSender } from "./guard.js";
 
 export type UpdateStatus =
   | { phase: "idle" }
@@ -34,6 +35,10 @@ function friendlyMessage(err: unknown): string {
 }
 
 export function registerUpdaterHandlers(win: BrowserWindow) {
+  // Chỉ cho phép "cài & khởi động lại" khi đã thực sự tải xong một bản cập nhật hợp lệ
+  // (trước đây renderer gọi installNow lúc nào cũng được).
+  let updateDownloaded = false;
+
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowDowngrade = false;
@@ -76,6 +81,7 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
   });
 
   autoUpdater.on("update-downloaded", (info: UpdateInfo) => {
+    updateDownloaded = true;
     send(win, { phase: "ready", version: info.version });
   });
 
@@ -84,7 +90,8 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
     send(win, { phase: "error", message: friendlyMessage(err) });
   });
 
-  ipcMain.handle("updater:check", async () => {
+  ipcMain.handle("updater:check", async (evt) => {
+    if (!isTrustedSender(evt, win, "updater:check")) return;
     if (!app.isPackaged) {
       send(win, { phase: "not-available" });
       return;
@@ -97,7 +104,8 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
     }
   });
 
-  ipcMain.handle("updater:downloadNow", async () => {
+  ipcMain.handle("updater:downloadNow", async (evt) => {
+    if (!isTrustedSender(evt, win, "updater:downloadNow")) return;
     if (!app.isPackaged) {
       send(win, { phase: "error", message: "Không tải cập nhật được ở chế độ dev." });
       return;
@@ -111,7 +119,12 @@ export function registerUpdaterHandlers(win: BrowserWindow) {
     }
   });
 
-  ipcMain.handle("updater:installNow", () => {
+  ipcMain.handle("updater:installNow", (evt) => {
+    if (!isTrustedSender(evt, win, "updater:installNow")) return;
+    if (!updateDownloaded) {
+      logger.warn("updater", "installNow bị từ chối: chưa có bản cập nhật nào được tải xong");
+      return;
+    }
     autoUpdater.quitAndInstall(false, true);
   });
 }

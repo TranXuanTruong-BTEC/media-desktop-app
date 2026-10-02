@@ -44,7 +44,11 @@ export interface DownloadItem {
 // Số tải chạy cùng lúc tối đa — các link còn lại xếp hàng (trạng thái "queued")
 const MAX_CONCURRENT = 3;
 
-function uid() { return Math.random().toString(36).slice(2, 10); }
+/** ID ngẫu nhiên mật mã học (24 ký tự hex). Math.random() dễ trùng và đoán được. */
+function uid() {
+  const b = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
+}
 
 // ── Lịch sử tải (lưu bền vững, độc lập với hàng đợi) ─────────────────────────
 const HISTORY_KEY = "mediaget.history.v1";

@@ -17,10 +17,13 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -37,18 +40,45 @@ jobs:
           if (-not (Test-Path "build/icon.ico")) { throw "Missing build/icon.ico" }
           Write-Host "Using committed app icon: build/icon.ico ($((Get-Item build/icon.ico).Length) bytes)"
 
-      - name: Download yt-dlp.exe
+      # Công cụ đóng gói kèm installer (và được CHẠY trên máy người dùng) → bắt buộc xác minh
+      # SHA-256 theo checksum chính thức của nhà phát hành trước khi đưa vào bản build.
+      - name: Download yt-dlp.exe (verified against official SHA2-256SUMS)
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path tools
-          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "tools/yt-dlp.exe"
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          $tag = (Invoke-RestMethod -Uri "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest").tag_name
+          if ($tag -notmatch '^\d{4}\.\d{2}\.\d{2}(\.\d+)?$') { throw "Unexpected yt-dlp tag: $tag" }
+          $base = "https://github.com/yt-dlp/yt-dlp/releases/download/$tag"
+          $sums = Join-Path $env:RUNNER_TEMP "yt-dlp-SHA2-256SUMS"
+          Invoke-WebRequest -Uri "$base/yt-dlp.exe" -OutFile "tools/yt-dlp.exe"
+          Invoke-WebRequest -Uri "$base/SHA2-256SUMS" -OutFile $sums
+          $line = Select-String -Path $sums -Pattern '^([0-9a-fA-F]{64})\s+\*?yt-dlp\.exe\s*$' | Select-Object -First 1
+          if (-not $line) { throw "No checksum line for yt-dlp.exe in SHA2-256SUMS" }
+          $expected = $line.Matches[0].Groups[1].Value.ToLower()
+          $actual = (Get-FileHash "tools/yt-dlp.exe" -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) { throw "yt-dlp.exe SHA-256 mismatch: expected $expected, got $actual" }
+          Write-Host "OK: yt-dlp $tag verified ($actual)"
 
       # yt-dlp (from 2026) requires Node >= 22 for YouTube JS challenges.
-      - name: Download node.exe (portable Node 22)
+      - name: Download node.exe (portable Node 22, verified against SHASUMS256.txt)
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path tools
-          Invoke-WebRequest -Uri "https://nodejs.org/dist/latest-v22.x/win-x64/node.exe" -OutFile "tools/node.exe"
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          $base = "https://nodejs.org/dist/latest-v22.x"
+          $sums = Join-Path $env:RUNNER_TEMP "node-SHASUMS256.txt"
+          Invoke-WebRequest -Uri "$base/win-x64/node.exe" -OutFile "tools/node.exe"
+          Invoke-WebRequest -Uri "$base/SHASUMS256.txt" -OutFile $sums
+          $line = Select-String -Path $sums -Pattern '^([0-9a-fA-F]{64})\s+win-x64/node\.exe\s*$' | Select-Object -First 1
+          if (-not $line) { throw "No checksum line for win-x64/node.exe in SHASUMS256.txt" }
+          $expected = $line.Matches[0].Groups[1].Value.ToLower()
+          $actual = (Get-FileHash "tools/node.exe" -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) { throw "node.exe SHA-256 mismatch: expected $expected, got $actual" }
+          Write-Host "OK: node.exe verified ($actual)"
+
+      # ffmpeg.exe được tải + xác minh SHA-256 bởi scripts/fetch-ffmpeg.js (chạy ở bước `npm ci`
+      # qua postinstall và lại ở `predist --required`).
 
       # CI is the only publisher. electron-builder only builds (never uploads)
       # so the installer and latest.yml cannot get out of sync from two writers.

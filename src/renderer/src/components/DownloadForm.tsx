@@ -32,6 +32,17 @@ const AUDIO_OPTIONS: QualityOption[] = [
 
 const ALL_OPTIONS = [...VIDEO_OPTIONS, ...AUDIO_OPTIONS];
 
+/** Chỉ nhận http(s) hợp lệ — không chỉ kiểm tra tiền tố "http" (vd. "httpfoo:..."). */
+function isHttpUrl(raw: string): boolean {
+  if (raw.length > 2048 || /\s/.test(raw)) return false;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function QualitySelect({
   value,
   onChange,
@@ -139,7 +150,7 @@ export function DownloadForm({ outputDir, onSelectDir, onSubmit, clearKey }: Pro
     e.preventDefault();
     const trimmed = url.trim();
     if (!trimmed) { setError("Vui lòng nhập URL"); return; }
-    if (!trimmed.startsWith("http")) { setError("URL không hợp lệ"); return; }
+    if (!isHttpUrl(trimmed)) { setError("URL không hợp lệ (chỉ nhận link http/https)"); return; }
     if (!outputDir) { setError("Vui lòng chọn thư mục lưu"); return; }
     setError("");
     onSubmit(trimmed, quality, outputDir);
@@ -161,7 +172,7 @@ export function DownloadForm({ outputDir, onSelectDir, onSubmit, clearKey }: Pro
               onChange={e => { setUrl(e.target.value); setError(""); }}
               onPaste={e => {
                 const pasted = e.clipboardData.getData("text").trim();
-                if (pasted.startsWith("http")) { setUrl(pasted); setError(""); }
+                if (isHttpUrl(pasted)) { setUrl(pasted); setError(""); }
               }}
               placeholder="Dán link YouTube, TikTok, Facebook, Twitter..."
               className="w-full h-8 pl-8 pr-3 bg-[#0f1117] border border-[#3a4258] rounded text-[12px] text-text placeholder-muted outline-none focus:border-accent transition-colors"

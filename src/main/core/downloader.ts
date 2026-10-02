@@ -6,7 +6,7 @@
  */
 
 import { EventEmitter } from "events";
-import { spawn, spawnSync, ChildProcess, execSync } from "child_process";
+import { spawn, spawnSync, ChildProcess, execFileSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import { app } from "electron";
@@ -19,6 +19,9 @@ import {
   VideoQuality,
 } from "../../shared/ipc-types.js";
 import { logger } from "./logger.js";
+import {
+  isValidDownloadUrl, VALID_QUALITIES, escapeOutputTemplate, appendCapped, redactUrl,
+} from "./security.js";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -136,6 +139,20 @@ export function getYtDlpPath(): string {
 // nêu trong báo cáo QA (UI Blocking). Giờ chỉ dò tìm 1 lần rồi cache lại.
 let cachedNodeExe: string | null | undefined;
 
+/**
+ * Chạy `where.exe <name>` KHÔNG qua shell. `where` tìm trong thư mục hiện tại TRƯỚC khi
+ * tìm PATH, nên chạy từ thư mục hệ thống để một file node.exe/ffmpeg.exe "gài" trong
+ * thư mục làm việc của app không bị chọn nhầm.
+ */
+function whereExe(name: string): string {
+  return execFileSync("where.exe", [name], {
+    encoding: "utf8",
+    timeout: 3000,
+    windowsHide: true,
+    cwd: process.env["SystemRoot"] ?? "C:\\Windows",
+  }).trim();
+}
+
 export function findNodeExe(): string | null {
   if (cachedNodeExe !== undefined) return cachedNodeExe;
 
@@ -145,7 +162,7 @@ export function findNodeExe(): string | null {
   if (fs.existsSync(userNode)) return (cachedNodeExe = userNode);
 
   try {
-    const out = execSync("where node", { encoding: "utf8", timeout: 3000 }).trim();
+    const out = whereExe("node");
     for (const line of out.split(/\r?\n/)) {
       const p = line.trim();
       if (p && fs.existsSync(p) && !p.toLowerCase().includes("electron")) {
@@ -185,7 +202,7 @@ export function findFfmpeg(): string | null {
   if (fs.existsSync(bundled)) return (cachedFfmpeg = bundled);
 
   try {
-    const out = execSync("where ffmpeg", { encoding: "utf8", timeout: 3000 }).trim();
+    const out = whereExe("ffmpeg");
     const first = out.split(/\r?\n/)[0]?.trim();
     if (first && fs.existsSync(first)) return (cachedFfmpeg = first);
   } catch { /* ignore */ }
@@ -262,7 +279,9 @@ export interface BuiltArgs {
 export function buildArgs(req: DownloadRequest): BuiltArgs {
   const nodeExe   = findNodeExe();
   const jsRuntime = nodeExe ? ["--js-runtimes", `node:${nodeExe}`] : [];
-  const outputTpl = path.join(req.outputDir, "%(title)s.%(ext)s");
+  // Thư mục có thể chứa "%" (vd. "C:\\Tai 100%") — yt-dlp diễn giải %(...)s trong template -o,
+  // nên phải escape "%" → "%%" ở phần thư mục (chỉ phần "%(title)s.%(ext)s" là template thật).
+  const outputTpl = path.join(escapeOutputTemplate(req.outputDir), "%(title)s.%(ext)s");
   const ffmpeg    = findFfmpeg();
 
   if (!app.isPackaged) {
@@ -291,7 +310,10 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
     "--windows-filenames",
     "--trim-filenames", "150",
     ...jsRuntime,
-    "--remote-components", "ejs:github",
+    // Mặc định KHÔNG cho yt-dlp tự tải mã JavaScript từ GitHub rồi chạy bằng node (rủi ro chuỗi
+    // cung ứng). Bản yt-dlp.exe chính thức đã kèm sẵn bộ giải challenge. Nếu một số video YouTube
+    // báo "n challenge solving failed", đặt biến môi trường MEDIAGET_REMOTE_COMPONENTS=1 để bật lại.
+    ...(process.env["MEDIAGET_REMOTE_COMPONENTS"] === "1" ? ["--remote-components", "ejs:github"] : []),
     ...(ffmpeg ? ["--ffmpeg-location", ffmpeg] : []),
     "--newline",
     "-o", outputTpl,
@@ -303,7 +325,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
       // Không có ffmpeg thì yt-dlp không thể convert — tải nguyên bản âm
       // thanh gốc (thường là .webm/.m4a tùy nguồn) thay vì báo lỗi mập mờ.
       return {
-        args: [...sharedFlags, "-f", "bestaudio/best", req.url],
+        args: [...sharedFlags, "-f", "bestaudio/best", "--", req.url],
         warning:
           "Không tìm thấy ffmpeg trên máy nên không thể chuyển sang " +
           (isAudioMp3 ? "MP3" : "M4A") +
@@ -317,7 +339,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
         "--extract-audio",
         "--audio-format", isAudioMp3 ? "mp3" : "m4a",
         "--audio-quality", "0",
-        req.url,
+        "--", req.url,
       ],
     };
   }
@@ -335,7 +357,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
       : `best[vcodec!=none][acodec!=none]`;
 
     return {
-      args: [...sharedFlags, "-f", progressiveFormat, req.url],
+      args: [...sharedFlags, "-f", progressiveFormat, "--", req.url],
       warning:
         "Không tìm thấy ffmpeg trên máy nên đã tự động tải ở chất lượng thấp hơn " +
         "(tối đa thường là 720p) để tránh lỗi tách file hình/tiếng riêng. " +
@@ -360,7 +382,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
       // Ép encode lại audio sang AAC (chuẩn universal) lúc ghép để khắc phục
       // triệt để; video vẫn "copy" nguyên bản nên không mất chất lượng/thời gian.
       "--postprocessor-args", "Merger:-c:v copy -c:a aac -b:a 192k",
-      req.url,
+      "--", req.url,
     ],
   };
 }
@@ -504,13 +526,13 @@ function runAttempt(
 
     proc.stdout?.on("data", (buf: Buffer) => {
       const text = buf.toString();
-      stdoutBuf += text;
+      stdoutBuf = appendCapped(stdoutBuf, text);   // giới hạn bộ nhớ (trước đây tăng vô hạn)
       consume(text);
     });
 
     proc.stderr?.on("data", (buf: Buffer) => {
       const text = buf.toString();
-      stderrBuf += text;
+      stderrBuf = appendCapped(stderrBuf, text);
       consume(text);
       if (!app.isPackaged) process.stderr.write("[ytdlp stderr] " + text);
     });
@@ -567,6 +589,15 @@ export function startDownload(req: DownloadRequest): {
 } {
   const emitter = new EventEmitter() as Downloader;
 
+  // Phòng thủ nhiều lớp: IPC đã kiểm tra, nhưng core cũng không tin đầu vào.
+  if (!isValidDownloadUrl(req.url) || !VALID_QUALITIES.has(req.quality)) {
+    logger.warn("downloader", "Request không hợp lệ bị chặn ở core", { url: redactUrl(req.url) });
+    setImmediate(() =>
+      emitter.emit("error", { id: req.id, message: "Yêu cầu tải không hợp lệ (URL hoặc chất lượng)." })
+    );
+    return { emitter, cancel: () => {} };
+  }
+
   const ytDlp = getYtDlpPath();
   if (!fs.existsSync(ytDlp)) {
     logger.error("downloader", "Thiếu yt-dlp.exe", { ytDlp });
@@ -620,11 +651,11 @@ export function startDownload(req: DownloadRequest): {
             "Không tải được video — nguồn chỉ trả về file âm thanh (MP3/M4A). " +
             "Thường gặp với TikTok dạng ảnh/slideshow, hoặc khi luồng hình bị chặn. " +
             "Chọn “Chỉ âm thanh” nếu bạn muốn giữ file nhạc.";
-          logger.warn("downloader", message, { url: req.url, file: result.lastFilename });
+          logger.warn("downloader", message, { url: redactUrl(req.url), file: result.lastFilename });
           emitter.emit("error", { id: req.id, message });
           return;
         }
-        if (result.warning) logger.warn("downloader", result.warning, { url: req.url });
+        if (result.warning) logger.warn("downloader", result.warning, { url: redactUrl(req.url) });
         emitter.emit("complete", {
           id:       req.id,
           filepath: path.join(req.outputDir, result.lastFilename),
@@ -635,7 +666,7 @@ export function startDownload(req: DownloadRequest): {
       }
 
       if (result.outcome === "fatal-error") {
-        logger.error("downloader", "fatal-error", { url: req.url, ...result });
+        logger.error("downloader", "fatal-error", { ...result, url: redactUrl(req.url) });
         emitter.emit("error", {
           id:      req.id,
           message: result.errorSummary || `Tải thất bại (code ${result.exitCode})`,

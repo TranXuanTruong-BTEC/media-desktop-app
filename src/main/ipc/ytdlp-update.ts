@@ -6,7 +6,8 @@
  */
 
 import { ipcMain, BrowserWindow, app } from "electron";
-import { checkAndUpdateYtDlp, YtdlpUpdatePhase } from "../core/ytdlp-updater.js";
+import { checkAndUpdateYtDlp, YtdlpUpdatePhase, YtdlpUpdaterEmitter } from "../core/ytdlp-updater.js";
+import { isTrustedSender } from "./guard.js";
 
 export const YTDLP_IPC = {
   STATUS: "ytdlp-updater:status",
@@ -18,8 +19,13 @@ function send(win: BrowserWindow, status: YtdlpUpdatePhase) {
   if (!win.isDestroyed()) win.webContents.send(YTDLP_IPC.STATUS, status);
 }
 
+// checkAndUpdateYtDlp() trả lại cùng một emitter nếu đang có lượt chạy → chỉ gắn listener 1 lần
+const attached = new WeakSet<YtdlpUpdaterEmitter>();
+
 function runUpdate(win: BrowserWindow, force = false) {
   const emitter = checkAndUpdateYtDlp(force);
+  if (attached.has(emitter)) return;
+  attached.add(emitter);
   emitter.on("status", (s) => {
     send(win, s);
     if (!app.isPackaged) console.log("[ytdlp-updater]", s);
@@ -28,10 +34,16 @@ function runUpdate(win: BrowserWindow, force = false) {
 
 export function registerYtdlpUpdaterHandlers(win: BrowserWindow) {
   // Renderer gọi thủ công (nút "Kiểm tra")
-  ipcMain.handle(YTDLP_IPC.CHECK, () => runUpdate(win, false));
+  ipcMain.handle(YTDLP_IPC.CHECK, (evt) => {
+    if (!isTrustedSender(evt, win, YTDLP_IPC.CHECK)) return;
+    runUpdate(win, false);
+  });
 
   // Renderer ép tải lại (nút "Tải lại yt-dlp")
-  ipcMain.handle(YTDLP_IPC.FORCE, () => runUpdate(win, true));
+  ipcMain.handle(YTDLP_IPC.FORCE, (evt) => {
+    if (!isTrustedSender(evt, win, YTDLP_IPC.FORCE)) return;
+    runUpdate(win, true);
+  });
 
   // Tự động check khi app khởi động — chỉ bản đóng gói, delay 5s
   if (app.isPackaged) {
