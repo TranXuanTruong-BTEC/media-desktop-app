@@ -144,6 +144,31 @@ test("appendCapped giữ phần đuôi, không vượt giới hạn", () => {
   assert.strictEqual(b.length, 5000);
 });
 
+
+console.log("normalizeDownloadUrl (Douyin / link dán dính)");
+const urlmod = require("../dist-electron/shared/url.js");
+test("link dán dính đôi (đúng lỗi người dùng gặp) → lấy link đầu", () => {
+  const d = "https://www.douyin.com/jingxuan?modal_id=7697621631518166282";
+  assert.strictEqual(urlmod.normalizeDownloadUrl(d + d), "https://www.douyin.com/video/7697621631518166282");
+});
+test("Douyin modal_id ở mọi trang → /video/ID", () => {
+  for (const u of ["https://www.douyin.com/jingxuan?modal_id=7697621631518166282", "https://www.douyin.com/discover?modal_id=7697621631518166282",
+    "https://www.douyin.com/user/MS4wLjABAAAA?modal_id=7697621631518166282&from_tab_name=main", "https://douyin.com/search/abc?modal_id=7697621631518166282&type=general",
+    "https://www.douyin.com/video/7697621631518166282?previous_page=app_code_link"])
+    assert.strictEqual(urlmod.normalizeDownloadUrl(u), "https://www.douyin.com/video/7697621631518166282", u);
+});
+test("đoạn chia sẻ Douyin (có chữ Trung) → trích link", () => {
+  const share = "7.43 复制打开抖音，看看【某某的作品】电影解说 https://v.douyin.com/AbCdEf1/ 12/05 abc:/ 【打开】";
+  assert.strictEqual(urlmod.normalizeDownloadUrl(share), "https://v.douyin.com/AbCdEf1/");
+});
+test("link khác giữ nguyên; không có link → null; không đụng YouTube/TikTok", () => {
+  assert.strictEqual(urlmod.normalizeDownloadUrl("https://www.youtube.com/watch?v=abc&t=5"), "https://www.youtube.com/watch?v=abc&t=5");
+  assert.strictEqual(urlmod.normalizeDownloadUrl("https://www.tiktok.com/@a/video/123?lang=vi"), "https://www.tiktok.com/@a/video/123?lang=vi");
+  assert.strictEqual(urlmod.normalizeDownloadUrl("không có link"), null);
+  assert.strictEqual(urlmod.normalizeDownloadUrl("javascript:alert(1)"), null);
+  assert.strictEqual(urlmod.normalizeDownloadUrl("https://v.douyin.com/x/https://v.douyin.com/y/"), "https://v.douyin.com/x/");
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
 })();
