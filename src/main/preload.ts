@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld("api", {
   saveCookies:      (text: string) => ipcRenderer.invoke("cookies:save", text),
   importCookies:    ()             => ipcRenderer.invoke("cookies:import"),
   clearCookies:     ()             => ipcRenderer.invoke("cookies:clear"),
+  setCookieBrowser: (b: string)    => ipcRenderer.invoke("cookies:setBrowser", b),
 
   // Window controls
   winMinimize: () => ipcRenderer.send("win:minimize"),

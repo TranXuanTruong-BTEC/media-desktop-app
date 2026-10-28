@@ -21,6 +21,7 @@ export const IPC = {
   COOKIES_SAVE:      "cookies:save",
   COOKIES_IMPORT:    "cookies:import",
   COOKIES_CLEAR:     "cookies:clear",
+  COOKIES_SET_BROWSER: "cookies:setBrowser",
 } as const;
 
 export type VideoQuality = "bestvideo+bestaudio" | "1080p" | "720p" | "480p" | "360p" | "audio_mp3" | "audio_m4a";
@@ -59,7 +60,11 @@ export interface DownloadError {
   message: string;
 }
 
+/** Trình duyệt để yt-dlp đọc cookies trực tiếp (--cookies-from-browser). "none" = không dùng. */
+export type CookieBrowser = "none" | "firefox" | "edge" | "chrome" | "brave";
+
 export interface CookiesStatus {
+  browser: CookieBrowser;
   exists: boolean;
   count: number;
   domains: string[];      // tối đa vài tên miền đầu tiên, chỉ để hiển thị
