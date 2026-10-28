@@ -79,9 +79,6 @@ const FATAL_PATTERNS = [
   /http error 404/i,
 ];
 
-// Chỉ phân loại dựa trên các dòng báo lỗi của yt-dlp. Trước đây quét TOÀN BỘ log
-// (gồm cả dòng tiến trình/tiêu đề video) nên chuỗi như "404.15MiB" hay tiêu đề có
-// chữ "copyright" bị nhận nhầm là lỗi nặng và không được thử lại.
 const ERROR_LINE_RE = /^\s*(ERROR|WARNING)\b|\[download\] Got error|HTTP Error/i;
 
 function classifyError(stderr: string, stdout: string): "network" | "fatal" {
@@ -132,18 +129,8 @@ export function getYtDlpPath(): string {
   return path.join(getBundledToolsDir(), "yt-dlp.exe");
 }
 
-// Cache kết quả tìm node.exe: trước đây hàm này gọi execSync("where node")
-// (blocking, tốn tới 3s timeout) MỖI LẦN buildArgs() chạy — tức là mỗi lần
-// bắt đầu tải HOẶC mỗi lần retry, main process (và do đó toàn bộ UI, vì IPC
-// đồng bộ với renderer) bị đứng khựng. Đây chính là nguyên nhân "giật/lag"
-// nêu trong báo cáo QA (UI Blocking). Giờ chỉ dò tìm 1 lần rồi cache lại.
 let cachedNodeExe: string | null | undefined;
 
-/**
- * Chạy `where.exe <name>` KHÔNG qua shell. `where` tìm trong thư mục hiện tại TRƯỚC khi
- * tìm PATH, nên chạy từ thư mục hệ thống để một file node.exe/ffmpeg.exe "gài" trong
- * thư mục làm việc của app không bị chọn nhầm.
- */
 function whereExe(name: string): string {
   return execFileSync("where.exe", [name], {
     encoding: "utf8",
@@ -182,15 +169,6 @@ export function findNodeExe(): string | null {
   return (cachedNodeExe = null);
 }
 
-// Cache ffmpeg giống node.exe: dò 1 lần rồi dùng lại.
-// Đây là NGUYÊN NHÂN CHÍNH của lỗi "sai định dạng / ra 2 file .webm" —
-// app trước đây không hề dò hay truyền --ffmpeg-location cho yt-dlp. Với các
-// video YouTube có luồng hình và tiếng tách riêng (gần như mọi video từ 720p
-// trở lên, và nhiều video ở độ phân giải thấp hơn), yt-dlp BẮT BUỘC cần
-// ffmpeg để ghép 2 luồng lại. Không có ffmpeg, yt-dlp vẫn thoát với exit
-// code 0 (nên app báo "Hoàn thành" bình thường) nhưng để lại 2 file riêng
-// dạng "<tên video>.f247.webm" (chỉ hình) và "<tên video>.f251.webm"
-// (chỉ tiếng) — đúng như trường hợp bạn gặp.
 let cachedFfmpeg: string | null | undefined;
 
 export function findFfmpeg(): string | null {
@@ -223,7 +201,6 @@ export function findFfmpeg(): string | null {
 const MERGE_AUDIO = "bestaudio[ext!=mp3][acodec!=none]/bestaudio[ext!=mp3]/bestaudio";
 
 const QUALITY_FORMAT: Record<VideoQuality, string> = {
-  // `bestvideo` (không *) bỏ format đã mux. TikTok thường chỉ có mp4 gộp + MP3 nhạc.
   "bestvideo+bestaudio": `bestvideo*+${MERGE_AUDIO}/best[vcodec!=none]`,
   "1080p":  `bestvideo*[height<=1080]+${MERGE_AUDIO}/best[height<=1080][vcodec!=none]`,
   "720p":   `bestvideo*[height<=720]+${MERGE_AUDIO}/best[height<=720][vcodec!=none]`,
@@ -241,8 +218,6 @@ function isTikTokUrl(url: string): boolean {
     return /tiktok\.com|douyin\.com/i.test(url);
   }
 }
-
-/** Một file video đã mux — không +bestaudio để tránh tải nhầm MP3 nhạc gốc. */
 function muxedVideoFormat(height?: string): string {
   const h = height ? `[height<=${height}]` : "";
   return [
@@ -272,15 +247,12 @@ function isAudioOnlyFilename(name: string): boolean {
 
 export interface BuiltArgs {
   args: string[];
-  /** Có khi ffmpeg không sẵn có và phải hạ cấp cách tải để tránh ra file lỗi */
   warning?: string;
 }
 
 export function buildArgs(req: DownloadRequest): BuiltArgs {
   const nodeExe   = findNodeExe();
   const jsRuntime = nodeExe ? ["--js-runtimes", `node:${nodeExe}`] : [];
-  // Thư mục có thể chứa "%" (vd. "C:\\Tai 100%") — yt-dlp diễn giải %(...)s trong template -o,
-  // nên phải escape "%" → "%%" ở phần thư mục (chỉ phần "%(title)s.%(ext)s" là template thật).
   const outputTpl = path.join(escapeOutputTemplate(req.outputDir), "%(title)s.%(ext)s");
   const ffmpeg    = findFfmpeg();
 
@@ -291,16 +263,6 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
 
   const isAudioMp3 = req.quality === "audio_mp3";
   const isAudio    = isAudioMp3 || req.quality === "audio_m4a";
-
-  // --continue         : resume file tải dở (yt-dlp sẽ bỏ qua phần đã có)
-  // --retries 1        : yt-dlp tự retry 1 lần ở tầng HTTP; ta quản lý retry ở tầng process
-  // --fragment-retries : retry fragment HLS/DASH bị lỗi
-  // --windows-filenames: ép tên file an toàn trên Windows (loại bỏ : * ? " < > | và các
-  //                       ký tự điều khiển) — trước đây thiếu flag này khiến tiêu đề video
-  //                       chứa ký tự đặc biệt tạo ra đường dẫn không hợp lệ
-  //                       (Path Resolution Error nêu trong báo cáo QA). Tiếng Việt có dấu
-  //                       vẫn được giữ nguyên vì đó là ký tự Unicode hợp lệ trên NTFS.
-  // --trim-filenames   : giới hạn độ dài tên file, tránh lỗi "path too long" trên Windows.
   const sharedFlags = [
     "--no-playlist",
     "--continue",
@@ -310,9 +272,6 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
     "--windows-filenames",
     "--trim-filenames", "150",
     ...jsRuntime,
-    // Mặc định KHÔNG cho yt-dlp tự tải mã JavaScript từ GitHub rồi chạy bằng node (rủi ro chuỗi
-    // cung ứng). Bản yt-dlp.exe chính thức đã kèm sẵn bộ giải challenge. Nếu một số video YouTube
-    // báo "n challenge solving failed", đặt biến môi trường MEDIAGET_REMOTE_COMPONENTS=1 để bật lại.
     ...(process.env["MEDIAGET_REMOTE_COMPONENTS"] === "1" ? ["--remote-components", "ejs:github"] : []),
     ...(ffmpeg ? ["--ffmpeg-location", ffmpeg] : []),
     "--newline",
@@ -321,9 +280,6 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
 
   if (isAudio) {
     if (!ffmpeg) {
-      // Trích xuất/đổi định dạng âm thanh (mp3/m4a) cần ffmpeg để encode.
-      // Không có ffmpeg thì yt-dlp không thể convert — tải nguyên bản âm
-      // thanh gốc (thường là .webm/.m4a tùy nguồn) thay vì báo lỗi mập mờ.
       return {
         args: [...sharedFlags, "-f", "bestaudio/best", "--", req.url],
         warning:
@@ -345,11 +301,6 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
   }
 
   if (!ffmpeg) {
-    // Không có ffmpeg → KHÔNG được chọn bestvideo+bestaudio (2 luồng tách
-    // rời cần ghép), nếu không sẽ tái diễn đúng lỗi "ra 2 file .webm" mà
-    // người dùng gặp phải. Chỉ chọn các format đã ghép sẵn (progressive) từ
-    // YouTube — đảm bảo luôn ra 1 file chơi được, dù chất lượng có thể thấp
-    // hơn (YouTube thường giới hạn progressive ở mức 720p).
     const heightMatch = formatSelector(req.quality, req.url)?.match(/height<=(\d+)/);
     const height = heightMatch ? heightMatch[1] : null;
     const progressiveFormat = height
@@ -369,31 +320,16 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
   return {
     args: [
       ...sharedFlags,
-      // Ưu tiên format có hình; tránh chọn track nhạc MP3 khi nguồn có cả video.
       "--format-sort", "hasvid,res,vcodec:h264,ext:mp4:m4a",
       "-f", formatSelector(req.quality, req.url),
       "--merge-output-format", "mp4",
-      // Nguồn YouTube thường tách luồng hình (VP9/AV1, webm) và luồng tiếng
-      // (Opus, webm). Mặc định yt-dlp ghép bằng "-c copy" (giữ nguyên codec)
-      // → track âm thanh Opus nằm trong container MP4. Rất nhiều trình phát
-      // phổ biến (Windows Media Player, app "Phim & TV", nhiều app di động)
-      // KHÔNG giải mã được Opus → video chạy nhưng câm tiếng, dù file không
-      // lỗi gì (đây chính là lỗi "tải về không có âm thanh" người dùng gặp).
-      // Ép encode lại audio sang AAC (chuẩn universal) lúc ghép để khắc phục
-      // triệt để; video vẫn "copy" nguyên bản nên không mất chất lượng/thời gian.
       "--postprocessor-args", "Merger:-c:v copy -c:a aac -b:a 192k",
       "--", req.url,
     ],
   };
 }
 
-// ─── Single attempt ───────────────────────────────────────────────────────────
-
-/**
- * Dừng yt-dlp CÙNG các tiến trình con (ffmpeg, node...). proc.kill() trên Windows
- * chỉ dừng yt-dlp.exe, ffmpeg đang ghép file có thể bị bỏ sót và chạy mồ côi.
- * sync=true dùng khi thoát app (cần chắc chắn xong trước khi process main kết thúc).
- */
+// ─── Single attempt
 function killTree(proc: ChildProcess, sync = false): void {
   const pid = proc.pid;
   if (process.platform === "win32" && pid) {
@@ -406,7 +342,7 @@ function killTree(proc: ChildProcess, sync = false): void {
           .on("error", () => { try { proc.kill(); } catch { /* ignore */ } });
       }
       return;
-    } catch { /* rơi xuống proc.kill() */ }
+    } catch { }
   }
   try { proc.kill(); } catch { /* ignore */ }
 }
@@ -449,8 +385,6 @@ function runAttempt(
         },
       });
     } catch (err) {
-      // spawn() có thể throw đồng bộ (vd. thiếu quyền thực thi) — trước đây
-      // lỗi này không được bắt, dễ làm main process crash.
       resolve({
         outcome: "fatal-error",
         lastFilename: "",
@@ -467,7 +401,6 @@ function runAttempt(
     let lastVideoFilename = "";
     let stdoutBuf    = "";
     let stderrBuf    = "";
-    // Tiến trình gộp: video + tiếng là 2 luồng tải riêng, mỗi luồng chạy 0→100%.
     let totalStreams = 1;
     let streamIdx    = 0;
 
@@ -479,7 +412,6 @@ function runAttempt(
 
     const consume = (text: string) => {
       for (const line of text.split(/\r?\n/)) {
-        // "[info] id: Downloading 1 format(s): 137+140" → 2 luồng
         const fmt = line.match(/Downloading \d+ format\(s\):\s*(\S+)/);
         if (fmt) totalStreams = Math.max(1, fmt[1].split("+").length);
 
@@ -488,14 +420,12 @@ function runAttempt(
           rememberFilename(line.replace(/^.*\[download\] Destination:/, "").trim());
         }
 
-        // File đã có sẵn từ trước (resume / tải lại): không có dòng Destination
         const already = line.match(/^\[download\]\s+(.+?)\s+has already been downloaded/);
         if (already) {
           streamIdx++;
           rememberFilename(already[1]);
         }
 
-        // MP3/M4A: tên cuối cùng nằm ở bước ExtractAudio, không phải bước download
         const extract = line.match(/^\[ExtractAudio\] Destination:\s*(.+)$/);
         if (extract) rememberFilename(extract[1].trim());
         const notConv = line.match(/^\[ExtractAudio\] Not converting audio (.+?); file is already in target format/);
@@ -526,7 +456,7 @@ function runAttempt(
 
     proc.stdout?.on("data", (buf: Buffer) => {
       const text = buf.toString();
-      stdoutBuf = appendCapped(stdoutBuf, text);   // giới hạn bộ nhớ (trước đây tăng vô hạn)
+      stdoutBuf = appendCapped(stdoutBuf, text); 
       consume(text);
     });
 
@@ -571,18 +501,8 @@ function runAttempt(
   });
 }
 
-// ─── Main export ──────────────────────────────────────────────────────────────
+// ─── Main export 
 
-/**
- * Bắt đầu tải một video với retry + resume tự động.
- *
- * - Retry tối đa MAX_ATTEMPTS lần khi gặp lỗi mạng
- * - `--continue` để yt-dlp resume phần đã tải
- * - Exponential backoff giữa các lần retry (3s, 6s)
- * - Lỗi fatal → không retry
- *
- * Events: "progress" | "complete" | "error" | "retrying"
- */
 export function startDownload(req: DownloadRequest): {
   emitter: Downloader;
   cancel:  (sync?: boolean) => void;
@@ -607,9 +527,6 @@ export function startDownload(req: DownloadRequest): {
     return { emitter, cancel: () => {} };
   }
 
-  // Kiểm tra thư mục lưu tồn tại & ghi được TRƯỚC khi spawn yt-dlp — trước đây
-  // nếu người dùng chọn thư mục rồi xóa/rút ổ đĩa ngoài, lỗi ghi file chỉ hiện
-  // ra dưới dạng exit code lạ, khó hiểu và không log lại được.
   try {
     fs.mkdirSync(req.outputDir, { recursive: true });
     fs.accessSync(req.outputDir, fs.constants.W_OK);
@@ -627,8 +544,6 @@ export function startDownload(req: DownloadRequest): {
     cancelToken.kill?.(sync);
     if (cancelToken.delayTimer) clearTimeout(cancelToken.delayTimer);
   };
-
-  // Tiến trình chỉ được tăng (không chạy lùi khi chuyển luồng / retry)
   let maxPercent = 0;
   const emitProgress = (p: DownloadProgress) => {
     if (p.percent < maxPercent) p = { ...p, percent: maxPercent };

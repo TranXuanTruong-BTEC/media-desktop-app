@@ -1,5 +1,3 @@
-// src/renderer/src/components/ConfirmDialog.tsx
-// Hộp thoại xác nhận trong app (thay cho window.confirm — tránh lỗi mất focus ô nhập trên Electron/Windows).
 import { useEffect, useRef } from "react";
 
 interface Props {
@@ -7,7 +5,6 @@ interface Props {
   title:       string;
   message:     string;
   confirmText?: string;
-  /** null = ẩn nút Huỷ (hộp thoại chỉ có 1 nút thông báo) */
   cancelText?:  string | null;
   danger?:      boolean;
   onConfirm:   () => void;

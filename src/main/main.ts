@@ -1,4 +1,3 @@
-// src/main/main.ts
 import { app, BrowserWindow, ipcMain, shell, dialog, session } from "electron";
 import path from "path";
 import fs from "fs";
@@ -9,12 +8,6 @@ import { logger } from "./core/logger.js";
 import { isTrustedSender, DEV_ORIGIN } from "./ipc/guard.js";
 
 const isDev = !app.isPackaged;
-
-// ─── Global exception safety net ──────────────────────────────────────────
-// Trước đây một lỗi bất đồng bộ không bắt được (vd. exception trong callback
-// của child_process, promise rejection trong downloader...) sẽ làm Electron
-// main process thoát đột ngột -> toàn bộ app "văng" mà không rõ nguyên nhân.
-// Giờ mọi lỗi đều được log lại và hiển thị hộp thoại thay vì crash âm thầm.
 process.on("uncaughtException", (err) => {
   logger.error("main", "uncaughtException", err);
   if (app.isReady()) {
@@ -29,7 +22,6 @@ process.on("unhandledRejection", (reason) => {
   logger.error("main", "unhandledRejection", reason);
 });
 
-/** Mở link https bằng trình duyệt mặc định; mọi scheme khác (file:, javascript:, ms-*:, ...) bị bỏ. */
 function openHttpsExternally(raw: string): boolean {
   try {
     if (typeof raw !== "string" || raw.length > 2048) return false;
@@ -55,16 +47,12 @@ function createWindow(): BrowserWindow {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,                       // renderer chạy trong sandbox của Chromium
+      sandbox: true,   
       webSecurity: true,
       allowRunningInsecureContent: false,
       webviewTag: false,
     },
   });
-
-  // Khoá điều hướng: renderer chỉ được ở trang của app. Link ra ngoài (target=_blank,
-  // window.open, kéo-thả file vào cửa sổ...) bị chặn; riêng https thì mở bằng trình duyệt
-  // hệ thống. Nếu không, trang bên ngoài có thể được mở trong cửa sổ có preload `window.api`.
   win.webContents.setWindowOpenHandler(({ url }) => {
     openHttpsExternally(url);
     return { action: "deny" };
@@ -90,10 +78,6 @@ function registerAppHandlers(win: BrowserWindow) {
     isTrustedSender(evt, win, "app:getDefaultDir") ? app.getPath("downloads") : null);
   ipcMain.handle("app:getVersion", (evt) =>
     isTrustedSender(evt, win, "app:getVersion") ? app.getVersion() : null);
-
-  // Nhận đường dẫn FILE → mở Explorer và chọn sẵn file; nhận THƯ MỤC → mở thư mục;
-  // file đã bị xoá/di chuyển → mở thư mục chứa nó (nếu còn).
-  // KHÔNG bao giờ thực thi file: chỉ "show in folder" / mở thư mục.
   ipcMain.handle("app:openPath", async (evt, filePath: unknown) => {
     if (!isTrustedSender(evt, win, "app:openPath")) return;
     try {
@@ -106,7 +90,6 @@ function registerAppHandlers(win: BrowserWindow) {
       const parent = path.dirname(filePath);
       if (fs.existsSync(parent)) await shell.openPath(parent);
     } catch (err) {
-      // File có thể đã bị người dùng xóa/di chuyển sau khi tải xong.
       logger.warn("app:openPath", "Không mở được thư mục chứa file", { err });
     }
   });
@@ -125,8 +108,6 @@ function registerAppHandlers(win: BrowserWindow) {
   ipcMain.on("win:close",    (evt) => { if (isTrustedSender(evt, win, "win:close")) win.close(); });
 }
 
-// Chỉ cho chạy MỘT cửa sổ app: mở lần 2 thì đưa cửa sổ cũ lên thay vì tạo cửa sổ mới
-// (2 cửa sổ cùng tải về 1 thư mục và cùng ghi lịch sử/log sẽ đè lẫn nhau).
 const gotSingleLock = app.requestSingleInstanceLock();
 
 if (!gotSingleLock) {

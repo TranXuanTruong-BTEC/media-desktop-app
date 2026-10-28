@@ -1,18 +1,8 @@
-/**
- * src/main/core/logger.ts
- *
- * Logger tối giản, ghi log lỗi phía main process ra file trong userData.
- * Giải quyết mục "Thiếu cơ chế Logging" trong báo cáo QA:
- * trước đây không có nơi nào lưu lại lỗi để trace khi user báo cáo sự cố.
- *
- * Không dùng thư viện ngoài — chỉ append text, xoay vòng file khi quá lớn.
- */
-
 import fs from "fs";
 import path from "path";
 import { app } from "electron";
 
-const MAX_LOG_BYTES = 2 * 1024 * 1024; // 2MB, tránh log phình to vô hạn
+const MAX_LOG_BYTES = 2 * 1024 * 1024;
 
 function getLogPath(): string {
   const dir = path.join(app.getPath("userData"), "logs");
@@ -26,7 +16,6 @@ function rotateIfNeeded(file: string) {
       fs.renameSync(file, file + ".old");
     }
   } catch {
-    /* best-effort, không để lỗi log làm crash app */
   }
 }
 
@@ -38,11 +27,9 @@ function write(level: "INFO" | "WARN" | "ERROR", scope: string, message: string,
       (extra !== undefined ? " " + safeStringify(extra) : "") + "\n";
     fs.appendFileSync(file, line);
     if (!app.isPackaged) {
-      // Trong dev vẫn in ra console để tiện theo dõi
       (level === "ERROR" ? console.error : console.log)(line.trim());
     }
   } catch {
-    /* Nếu ghi log thất bại (disk full, quyền truy cập...), không được làm crash app */
   }
 }
 

@@ -1,4 +1,3 @@
-// src/shared/ipc-types.ts
 export const IPC = {
   // Auto-updater
   UPDATER_CHECK:        "updater:check",
@@ -40,7 +39,6 @@ export interface DownloadProgress {
   eta: string;
   filename: string;
   size: string;
-  /** Khi tải nhiều luồng (hình + tiếng): "1/2", "2/2". percent đã là tiến trình gộp. */
   stage?: string;
 }
 
@@ -48,7 +46,6 @@ export interface DownloadComplete {
   id: string;
   filepath: string;
   filename: string;
-  /** Ghi chú khi yt-dlp phải hạ cấp/đổi cách tải (vd. thiếu ffmpeg) dù vẫn "thành công" */
   warning?: string;
 }
 
@@ -57,11 +54,10 @@ export interface DownloadError {
   message: string;
 }
 
-/** Phát trước mỗi lần retry — UI dùng để hiển thị "Thử lại 2/3" */
 export interface DownloadRetrying {
   id: string;
-  attempt: number;   // lần thử hiện tại (1-based, tức lần retry đầu = 1)
+  attempt: number;   
   maxAttempts: number;
-  reason: string;    // lý do thử lại (tóm tắt lỗi)
-  delayMs: number;   // số ms sẽ chờ trước khi spawn lại
+  reason: string;    
+  delayMs: number;   
 }

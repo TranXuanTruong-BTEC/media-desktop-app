@@ -1,16 +1,9 @@
-/**
- * src/main/core/security.ts
- *
- * Các hàm thuần (không phụ thuộc Electron) phục vụ kiểm tra đầu vào và xác minh
- * toàn vẹn. Tách riêng để có thể unit-test độc lập (xem scripts/security-selftest.js).
- */
-
 import crypto from "crypto";
 import fs from "fs";
 import nodePath from "path";
 import { VideoQuality } from "../../shared/ipc-types.js";
 
-// ─── Request validation ──────────────────────────────────────────────────────
+// ─── Request validation 
 
 export const VALID_QUALITIES: ReadonlySet<string> = new Set<VideoQuality>([
   "bestvideo+bestaudio", "1080p", "720p", "480p", "360p", "audio_mp3", "audio_m4a",
@@ -19,7 +12,6 @@ export const VALID_QUALITIES: ReadonlySet<string> = new Set<VideoQuality>([
 const MAX_URL_LENGTH  = 2048;
 const MAX_PATH_LENGTH = 400;
 
-/** id do renderer sinh ra; chỉ cho ký tự an toàn (dùng làm khoá Map + gửi lại UI). */
 export function isValidId(id: unknown): id is string {
   return typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id);
 }
@@ -36,22 +28,11 @@ export function isValidDownloadUrl(raw: unknown): raw is string {
     return false;
   }
 }
-
-/** Minimal shape of node's `path` (so tests can pass path.win32). */
 export interface PathApi {
   isAbsolute(p: string): boolean;
   normalize(p: string): string;
   sep: string;
 }
-
-/**
- * Kiểm tra thư mục lưu do renderer gửi lên. Trả về đường dẫn đã chuẩn hoá, hoặc null.
- *  - phải là đường dẫn tuyệt đối, không chứa NUL, không quá dài;
- *  - chặn namespace thiết bị Windows (\\.\ và \\?\);
- *  - đường dẫn UNC (\\server\share) chỉ được chấp nhận khi người dùng đã chọn nó
- *    qua hộp thoại chọn thư mục (allowedUnc) — tránh bị ép ghi/kết nối tới SMB
- *    của kẻ tấn công (rò rỉ hash NTLM).
- */
 export function validateOutputDir(
   dir: unknown,
   allowedUnc: ReadonlySet<string> = new Set(),
@@ -76,20 +57,13 @@ export function escapeOutputTemplate(dir: string): string {
   return dir.replace(/%/g, "%%");
 }
 
-// ─── Network safety (updater / build scripts) ────────────────────────────────
 
-/** Host được phép khi theo redirect lúc tải công cụ (chỉ GitHub + CDN của GitHub). */
 export const GITHUB_HOSTS: readonly string[] = ["github.com", "githubusercontent.com"];
 
 export function isAllowedHost(hostname: string, allowed: readonly string[]): boolean {
   const h = hostname.toLowerCase();
   return allowed.some(a => h === a || h.endsWith("." + a));
 }
-
-/**
- * Giải quyết header Location (có thể là đường dẫn tương đối) thành URL an toàn:
- * chỉ https và host nằm trong allowlist. Trả null nếu không hợp lệ.
- */
 export function resolveSafeRedirect(
   location: string,
   base: string,
@@ -105,14 +79,12 @@ export function resolveSafeRedirect(
   }
 }
 
-/** Tag release yt-dlp hợp lệ, vd. "2026.08.19" hoặc "2026.08.19.1". */
 export function isValidYtdlpTag(tag: unknown): boolean {
   return typeof tag === "string" && /^\d{4}\.\d{2}\.\d{2}(\.\d{1,8})?$/.test(tag);
 }
 
-// ─── Integrity ───────────────────────────────────────────────────────────────
+// ─── Integrity
 
-/** Đọc hash SHA-256 của `filename` từ nội dung file dạng `<hex>  <name>` (SHA2-256SUMS). */
 export function parseSha256Sums(text: string, filename: string): string | null {
   for (const raw of text.split(/\r?\n/)) {
     const m = raw.trim().match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
@@ -132,8 +104,6 @@ export function sha256File(file: string): Promise<string> {
       .on("end", () => resolve(h.digest("hex")));
   });
 }
-
-/** File thực thi Windows (PE) bắt đầu bằng "MZ". */
 export function looksLikeWindowsExe(file: string): boolean {
   try {
     const fd = fs.openSync(file, "r");
@@ -149,9 +119,8 @@ export function looksLikeWindowsExe(file: string): boolean {
   }
 }
 
-// ─── Logging hygiene ─────────────────────────────────────────────────────────
+// ─── Logging hygiene
 
-/** Bỏ query/hash/credentials khỏi URL trước khi ghi log (có thể chứa token). */
 export function redactUrl(raw: unknown): string {
   if (typeof raw !== "string") return "[non-string]";
   try {
@@ -161,8 +130,6 @@ export function redactUrl(raw: unknown): string {
     return "[invalid-url]";
   }
 }
-
-/** Nối text vào buffer nhưng chỉ giữ lại `max` ký tự cuối (tránh phình bộ nhớ). */
 export function appendCapped(buf: string, text: string, max = 256 * 1024): string {
   const next = buf + text;
   return next.length > max ? next.slice(next.length - max) : next;

@@ -1,9 +1,3 @@
-#!/usr/bin/env node
-/**
- * Ghi latest.yml (UTF-8 không BOM) từ đúng file installer vừa build.
- * PowerShell Set-Content -Encoding utf8 trên Windows thêm BOM → electron-updater
- * parse YAML thất bại, nên auto-update không chạy.
- */
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");

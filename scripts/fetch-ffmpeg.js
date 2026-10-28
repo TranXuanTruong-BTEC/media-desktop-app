@@ -1,22 +1,3 @@
-#!/usr/bin/env node
-/**
- * scripts/fetch-ffmpeg.js
- *
- * Tự động tải ffmpeg.exe (bản Windows tĩnh, LGPL) và đặt vào tools/ffmpeg.exe
- * để electron-builder đóng gói kèm app (xem "extraResources" trong package.json).
- * Nhờ vậy NGƯỜI DÙNG CUỐI KHÔNG CẦN TỰ CÀI FFMPEG — app tự mang theo.
- *
- * Dùng bản LGPL (không phải GPL) để tránh vướng nghĩa vụ cấp phép GPL khi
- * phân phối bản build — LGPL vẫn đủ codec cần cho remux/merge (-c copy) và
- * trích xuất mp3 (libmp3lame).
- *
- * Cách dùng:
- *   node scripts/fetch-ffmpeg.js            # best-effort, không fail nếu lỗi mạng
- *   node scripts/fetch-ffmpeg.js --required # bắt buộc phải có ffmpeg, lỗi thì exit 1
- *                                            # (dùng trước khi đóng gói bản release)
- *   FORCE_FFMPEG_DOWNLOAD=1 node scripts/fetch-ffmpeg.js   # tải lại dù đã có sẵn
- */
-
 const https  = require("https");
 const fs     = require("fs");
 const path   = require("path");
@@ -28,7 +9,6 @@ const BASE_URL        = "https://github.com/BtbN/FFmpeg-Builds/releases/download
 const FFMPEG_ZIP_URL  = `${BASE_URL}/${FFMPEG_ZIP_NAME}`;
 const CHECKSUMS_URL   = `${BASE_URL}/checksums.sha256`;
 
-// Bảo mật: chỉ theo redirect https tới GitHub / CDN của GitHub; luôn xác minh SHA-256.
 const ALLOWED_HOSTS = ["github.com", "githubusercontent.com"];
 const MAX_ZIP_BYTES = 400 * 1024 * 1024;
 const MAX_TEXT_BYTES = 1024 * 1024;
@@ -40,7 +20,7 @@ const REQUIRED  = process.argv.includes("--required");
 function log(msg)  { console.log(`[fetch-ffmpeg] ${msg}`); }
 function fail(msg) {
   console.error(`[fetch-ffmpeg] ${msg}`);
-  process.exit(REQUIRED ? 1 : 0); // best-effort: không chặn npm install nếu không bắt buộc
+  process.exit(REQUIRED ? 1 : 0);
 }
 
 function isAllowedHost(h) {
@@ -48,7 +28,6 @@ function isAllowedHost(h) {
   return ALLOWED_HOSTS.some(a => h === a || h.endsWith("." + a));
 }
 
-/** Mở GET https, tự follow redirect nhưng CHỈ khi đích là https + host GitHub. */
 function open(url, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
     let u;

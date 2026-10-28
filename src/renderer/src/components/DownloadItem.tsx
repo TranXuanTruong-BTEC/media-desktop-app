@@ -1,4 +1,3 @@
-// src/renderer/src/components/DownloadItem.tsx
 import React, { useEffect, useState } from "react";
 import { DownloadItem } from "../hooks/useDownload";
 
@@ -54,7 +53,6 @@ function SpeedDot() {
   );
 }
 
-/** Đếm ngược số giây còn lại trước khi retry */
 function RetryCountdown({ delayMs, startedAt }: { delayMs: number; startedAt: number }) {
   const [remaining, setRemaining] = useState(() =>
     Math.max(0, Math.ceil((startedAt + delayMs - Date.now()) / 1000))
@@ -75,8 +73,6 @@ function RetryCountdown({ delayMs, startedAt }: { delayMs: number; startedAt: nu
 }
 
 export function DownloadItemRow({ item, onCancel, onRemove, onRetry, onOpenFolder }: Props) {
-  // Hiệu ứng xoá: thu gọn + mờ dần rồi mới gỡ khỏi danh sách.
-  // Dùng setTimeout (không phụ thuộc onAnimationEnd) để vẫn xoá được khi tắt animation.
   const [leaving, setLeaving] = useState(false);
   function handleRemove() {
     if (leaving) return;

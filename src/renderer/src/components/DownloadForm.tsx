@@ -1,4 +1,3 @@
-// src/renderer/src/components/DownloadForm.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { VideoQuality } from "../../../shared/ipc-types";
 
@@ -7,7 +6,6 @@ interface Props {
   onOutputDirChange: (dir: string) => void;
   onSelectDir: () => void;
   onSubmit: (url: string, quality: VideoQuality, outputDir: string) => void;
-  /** Tăng giá trị này để xoá ô nhập link (App chỉ xoá khi link thực sự được nhận) */
   clearKey?: number;
 }
 
@@ -32,7 +30,6 @@ const AUDIO_OPTIONS: QualityOption[] = [
 
 const ALL_OPTIONS = [...VIDEO_OPTIONS, ...AUDIO_OPTIONS];
 
-/** Chỉ nhận http(s) hợp lệ — không chỉ kiểm tra tiền tố "http" (vd. "httpfoo:..."). */
 function isHttpUrl(raw: string): boolean {
   if (raw.length > 2048 || /\s/.test(raw)) return false;
   try {
