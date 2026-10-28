@@ -16,6 +16,11 @@ export const IPC = {
   DOWNLOAD_ERROR:    "download:error",
   DOWNLOAD_RETRYING: "download:retrying",
   FORMATS_READY:     "download:formatsReady",
+  // Cookies do người dùng cung cấp
+  COOKIES_STATUS:    "cookies:status",
+  COOKIES_SAVE:      "cookies:save",
+  COOKIES_IMPORT:    "cookies:import",
+  COOKIES_CLEAR:     "cookies:clear",
 } as const;
 
 export type VideoQuality = "bestvideo+bestaudio" | "1080p" | "720p" | "480p" | "360p" | "audio_mp3" | "audio_m4a";
@@ -52,6 +57,21 @@ export interface DownloadComplete {
 export interface DownloadError {
   id: string;
   message: string;
+}
+
+export interface CookiesStatus {
+  exists: boolean;
+  count: number;
+  domains: string[];      // tối đa vài tên miền đầu tiên, chỉ để hiển thị
+  totalDomains: number;
+  updatedAt: number | null;
+}
+
+export interface CookiesResult {
+  ok: boolean;
+  error?: string;
+  canceled?: boolean;
+  status?: CookiesStatus;
 }
 
 export interface DownloadRetrying {

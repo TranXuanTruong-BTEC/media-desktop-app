@@ -95,23 +95,22 @@ function summarizeError(stderr: string, stdout = ""): string {
   const combined = stderr + "\n" + stdout;
   const lines = combined.split("\n").map(l => l.trim()).filter(Boolean);
   if (lines.some(l => /fresh cookies/i.test(l))) {
-    return "Douyin yêu cầu cookie mới. Xuất cookies.txt (định dạng Netscape) từ trình duyệt đang mở douyin.com " +
-           "(tiện ích \"Get cookies.txt LOCALLY\"), lưu thành:\n" + getCookiesPath() + "\nrồi bấm tải lại.";
+    return "Trang này yêu cầu cookie mới. Vào Cài đặt → Cookies đăng nhập, dán nội dung cookies.txt " +
+           "(định dạng Netscape, xuất từ trình duyệt đang đăng nhập bằng tiện ích \"Get cookies.txt LOCALLY\") rồi bấm tải lại.";
   }
   const hint = lines.find(l => /n challenge solving failed|no supported javascript runtime|requested format is not available|sign in to confirm/i.test(l));
   if (hint) return hint;
   return lines.find(l => /error|failed|unable/i.test(l)) ?? lines[lines.length - 1] ?? "Lỗi không xác định";
 }
 
-// ─── Douyin cookies ───────────────────────────────────────────────────────────
+// ─── Cookies do người dùng cung cấp ───────────────────────────────────────────
 
-/** Douyin bắt buộc có cookie mới (yt-dlp báo "Fresh cookies ... are needed"). */
+/**
+ * File cookies.txt (Netscape) người dùng dán/chọn trong Cài đặt. Một số trang (Douyin, TikTok, nội dung
+ * cần đăng nhập...) bắt buộc có cookie. yt-dlp chỉ gửi cookie khớp tên miền của link đang tải.
+ */
 export function getCookiesPath(): string {
   return path.join(app.getPath("userData"), "cookies.txt");
-}
-
-function isDouyinUrl(url: string): boolean {
-  try { return /(^|\.)douyin\.com$/i.test(new URL(url).hostname); } catch { return false; }
 }
 
 // ─── Tool paths ───────────────────────────────────────────────────────────────
@@ -290,7 +289,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
     ...jsRuntime,
     ...(process.env["MEDIAGET_REMOTE_COMPONENTS"] === "1" ? ["--remote-components", "ejs:github"] : []),
     ...(ffmpeg ? ["--ffmpeg-location", ffmpeg] : []),
-    ...(isDouyinUrl(req.url) && fs.existsSync(getCookiesPath()) ? ["--cookies", getCookiesPath()] : []),
+    ...(fs.existsSync(getCookiesPath()) ? ["--cookies", getCookiesPath()] : []),
     "--newline",
     "-o", outputTpl,
   ];

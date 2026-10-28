@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { YtdlpUpdaterState } from "../hooks/useYtdlpUpdater";
 import { UpdaterState } from "../hooks/useUpdater";
+import type { CookiesStatus, CookiesResult } from "../../../shared/ipc-types";
 
 interface Props {
   outputDir: string;
@@ -31,6 +32,141 @@ function Card({
       {!hint && <div className="h-3" />}
       {children}
     </section>
+  );
+}
+
+const COOKIES_PLACEHOLDER =
+  "# Netscape HTTP Cookie File\n.tiktok.com\tTRUE\t/\tTRUE\t1793673935\tten_cookie\tgia_tri";
+
+function CookiesCard() {
+  const [status, setStatus]   = useState<CookiesStatus | null>(null);
+  const [text, setText]       = useState("");
+  const [busy, setBusy]       = useState(false);
+  const [msg, setMsg]         = useState<{ ok: boolean; text: string } | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    window.api.getCookiesStatus().then(setStatus).catch(() => setStatus(null));
+    return () => { if (clearTimer.current) clearTimeout(clearTimer.current); };
+  }, []);
+
+  const applyResult = (r: CookiesResult, okMessage: (s: CookiesStatus) => string) => {
+    if (r.canceled) return;
+    if (r.ok && r.status) {
+      setStatus(r.status);
+      setMsg({ ok: true, text: okMessage(r.status) });
+    } else {
+      setMsg({ ok: false, text: r.error ?? "Có lỗi xảy ra." });
+    }
+  };
+
+  const run = async (fn: () => Promise<CookiesResult>, okMessage: (s: CookiesStatus) => string) => {
+    if (busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fn();
+      applyResult(r, okMessage);
+      return r;
+    } catch {
+      setMsg({ ok: false, text: "Có lỗi xảy ra. Hãy thử lại." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const savedMsg = (s: CookiesStatus) => `Đã lưu ${s.count} cookie từ ${s.totalDomains} trang.`;
+
+  const handleSave = async () => {
+    if (!text.trim()) { setMsg({ ok: false, text: "Hãy dán nội dung cookies.txt vào ô bên trên." }); return; }
+    const r = await run(() => window.api.saveCookies(text), savedMsg);
+    if (r?.ok) setText("");   // không giữ cookie trong bộ nhớ giao diện sau khi đã lưu
+  };
+
+  const handleClear = () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      clearTimer.current = setTimeout(() => setConfirmClear(false), 3000);
+      return;
+    }
+    if (clearTimer.current) clearTimeout(clearTimer.current);
+    setConfirmClear(false);
+    void run(() => window.api.clearCookies(), () => "Đã xoá cookies.");
+  };
+
+  const hasCookies = !!status?.exists;
+  const btnBase = "h-8 px-3 rounded text-[12px] transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed";
+
+  return (
+    <Card
+      title="Cookies đăng nhập"
+      hint="Dùng cho các trang yêu cầu đăng nhập hoặc cookie mới (Douyin, TikTok, nội dung giới hạn...). Chỉ lưu trên máy này."
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <p className="flex-1 min-w-[160px] text-[12px] text-subtle">
+          {hasCookies
+            ? `Đang dùng ${status!.count} cookie · ${status!.totalDomains} trang`
+            : "Chưa có cookies"}
+        </p>
+        {hasCookies && (
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={busy}
+            className={`${btnBase} ${confirmClear ? "bg-red-500/20 text-red-400" : "bg-[#252a38] hover:bg-[#2f3547] text-subtle hover:text-text"}`}
+          >
+            {confirmClear ? "Bấm lần nữa để xoá" : "Xoá cookies"}
+          </button>
+        )}
+      </div>
+
+      {hasCookies && status!.domains.length > 0 && (
+        <p className="text-[11px] text-muted mb-2 break-words">
+          {status!.domains.join(", ")}
+          {status!.totalDomains > status!.domains.length ? ` và ${status!.totalDomains - status!.domains.length} trang khác` : ""}
+        </p>
+      )}
+
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder={COOKIES_PLACEHOLDER}
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        rows={5}
+        className="w-full resize-y px-3 py-2 bg-[#0f1117] border border-[#3a4258] focus:border-accent outline-none rounded text-[11px] font-mono text-subtle placeholder:text-muted/60"
+      />
+
+      <div className="flex flex-wrap items-center gap-2 mt-2">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={busy || !text.trim()}
+          className={`${btnBase} bg-accent/15 hover:bg-accent/25 text-accent font-medium`}
+        >
+          {hasCookies ? "Thay bằng cookies mới" : "Lưu cookies"}
+        </button>
+        <button
+          type="button"
+          onClick={() => run(() => window.api.importCookies(), savedMsg)}
+          disabled={busy}
+          className={`${btnBase} bg-[#252a38] hover:bg-[#2f3547] text-subtle hover:text-text`}
+        >
+          Chọn file cookies.txt...
+        </button>
+        {msg && (
+          <span className={`text-[12px] ${msg.ok ? "text-emerald-400" : "text-red-400"}`}>{msg.text}</span>
+        )}
+      </div>
+
+      <p className="text-[11px] text-muted mt-3 leading-relaxed">
+        Cách lấy: đăng nhập trang web trong trình duyệt, dùng tiện ích “Get cookies.txt LOCALLY” để xuất file
+        (định dạng Netscape), rồi dán nội dung hoặc chọn file ở đây. Cookies tương đương phiên đăng nhập của bạn —
+        đừng chia sẻ cho người khác.
+      </p>
+    </Card>
   );
 }
 
@@ -123,6 +259,8 @@ export function SettingsPage({
           </div>
         </div>
       </Card>
+
+      <CookiesCard />
 
       <Card title="Trang chủ" hint="Xem thêm các công cụ và tin mới nhất trên trang web của chúng tôi.">
         <div className="flex flex-wrap items-center justify-between gap-2">

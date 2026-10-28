@@ -50,6 +50,12 @@ contextBridge.exposeInMainWorld("api", {
     return () => ipcRenderer.removeListener(IPC.DOWNLOAD_RETRYING, fn);
   },
 
+  // Cookies (nội dung cookie không bao giờ trả về renderer)
+  getCookiesStatus: ()             => ipcRenderer.invoke("cookies:status"),
+  saveCookies:      (text: string) => ipcRenderer.invoke("cookies:save", text),
+  importCookies:    ()             => ipcRenderer.invoke("cookies:import"),
+  clearCookies:     ()             => ipcRenderer.invoke("cookies:clear"),
+
   // Window controls
   winMinimize: () => ipcRenderer.send("win:minimize"),
   winMaximize: () => ipcRenderer.send("win:maximize"),

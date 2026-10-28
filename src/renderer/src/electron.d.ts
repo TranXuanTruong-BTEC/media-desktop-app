@@ -1,4 +1,4 @@
-import type { DownloadRequest, DownloadProgress, DownloadComplete, DownloadError } from "../../shared/ipc-types";
+import type { DownloadRequest, DownloadProgress, DownloadComplete, DownloadError, CookiesStatus, CookiesResult } from "../../shared/ipc-types";
 
 declare global {
   interface Window {
@@ -11,6 +11,10 @@ declare global {
       onProgress: (cb: (p: DownloadProgress) => void) => () => void;
       onComplete: (cb: (c: DownloadComplete) => void) => () => void;
       onError:    (cb: (e: DownloadError)    => void) => () => void;
+      getCookiesStatus: () => Promise<CookiesStatus | null>;
+      saveCookies:      (text: string) => Promise<CookiesResult>;
+      importCookies:    () => Promise<CookiesResult>;
+      clearCookies:     () => Promise<CookiesResult>;
       winMinimize: () => void;
       winMaximize: () => void;
       winClose:    () => void;
