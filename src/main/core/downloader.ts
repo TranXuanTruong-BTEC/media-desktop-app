@@ -17,8 +17,10 @@ import {
   DownloadError,
   DownloadRetrying,
   VideoQuality,
+  CookieBrowser,
 } from "../../shared/ipc-types.js";
 import { logger } from "./logger.js";
+import { isCookieBrowser, usesBrowserCookies } from "./cookies.js";
 import {
   isValidDownloadUrl, VALID_QUALITIES, escapeOutputTemplate, appendCapped, redactUrl,
 } from "./security.js";
@@ -94,9 +96,15 @@ function classifyError(stderr: string, stdout: string): "network" | "fatal" {
 function summarizeError(stderr: string, stdout = ""): string {
   const combined = stderr + "\n" + stdout;
   const lines = combined.split("\n").map(l => l.trim()).filter(Boolean);
+  const browserLine = lines.find(l => /cookies? (database|from)|could not find .* cookies|failed to decrypt|DPAPI|could not copy .*cookie/i.test(l));
+  if (browserLine) {
+    return "Không đọc được cookies từ trình duyệt đã chọn. Hãy đăng nhập douyin.com bằng Firefox, " +
+           "chọn Firefox ở Cài đặt → Cookies đăng nhập (Chrome/Edge bản mới thường không đọc được), rồi tải lại.\n" +
+           browserLine.slice(0, 200);
+  }
   if (lines.some(l => /fresh cookies/i.test(l))) {
-    return "Trang này yêu cầu cookie mới. Vào Cài đặt → Cookies đăng nhập, dán nội dung cookies.txt " +
-           "(định dạng Netscape, xuất từ trình duyệt đang đăng nhập bằng tiện ích \"Get cookies.txt LOCALLY\") rồi bấm tải lại.";
+    return "Trang này yêu cầu cookie mới. Vào Cài đặt → Cookies đăng nhập: chọn \"Lấy cookies từ trình duyệt\" (khuyên dùng Firefox, " +
+           "đã đăng nhập douyin.com) hoặc dán cookies.txt (định dạng Netscape), rồi bấm tải lại.";
   }
   const hint = lines.find(l => /n challenge solving failed|no supported javascript runtime|requested format is not available|sign in to confirm/i.test(l));
   if (hint) return hint;
@@ -111,6 +119,29 @@ function summarizeError(stderr: string, stdout = ""): string {
  */
 export function getCookiesPath(): string {
   return path.join(app.getPath("userData"), "cookies.txt");
+}
+
+function getCookieBrowserPath(): string {
+  return path.join(app.getPath("userData"), "cookie-browser.txt");
+}
+
+/** Trình duyệt người dùng chọn trong Cài đặt ("none" nếu chưa chọn / file hỏng). */
+export function getCookieBrowser(): CookieBrowser {
+  try {
+    const v = fs.readFileSync(getCookieBrowserPath(), "utf8").trim();
+    return isCookieBrowser(v) ? v : "none";
+  } catch { return "none"; }
+}
+
+export function setCookieBrowser(b: CookieBrowser): void {
+  fs.writeFileSync(getCookieBrowserPath(), b, "utf8");
+}
+
+/** Douyin/TikTok: ưu tiên cookies từ trình duyệt đã chọn; còn lại dùng file cookies.txt nếu có. */
+function cookieArgs(url: string): string[] {
+  const browser = getCookieBrowser();
+  if (browser !== "none" && usesBrowserCookies(url)) return ["--cookies-from-browser", browser];
+  return fs.existsSync(getCookiesPath()) ? ["--cookies", getCookiesPath()] : [];
 }
 
 // ─── Tool paths ───────────────────────────────────────────────────────────────
@@ -289,7 +320,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
     ...jsRuntime,
     ...(process.env["MEDIAGET_REMOTE_COMPONENTS"] === "1" ? ["--remote-components", "ejs:github"] : []),
     ...(ffmpeg ? ["--ffmpeg-location", ffmpeg] : []),
-    ...(fs.existsSync(getCookiesPath()) ? ["--cookies", getCookiesPath()] : []),
+    ...cookieArgs(req.url),
     "--newline",
     "-o", outputTpl,
   ];

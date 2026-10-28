@@ -169,6 +169,31 @@ test("link khác giữ nguyên; không có link → null; không đụng YouTube
   assert.strictEqual(urlmod.normalizeDownloadUrl("https://v.douyin.com/x/https://v.douyin.com/y/"), "https://v.douyin.com/x/");
 });
 
+console.log("cookies (parse + trình duyệt)");
+const ck = require("../dist-electron/main/core/cookies.js");
+test("parse cookies Netscape: giữ cookie hợp lệ, bỏ chú thích/dòng rác", () => {
+  const r = ck.parseCookiesText("# c\n.a.com\tTRUE\t/\tTRUE\t1793673935\tsid\tv1\n#HttpOnly_.b.com\tTRUE\t/\tTRUE\t0\tx\ty\nrác\n");
+  assert.ok(r.ok); assert.strictEqual(r.summary.count, 2); assert.deepStrictEqual(r.summary.domains, ["a.com", "b.com"]);
+  assert.ok(r.text.startsWith("# Netscape HTTP Cookie File\n"));
+});
+test("parse cookies: chịu được BOM, CRLF, tab bị đổi thành dấu cách; cho phép tên rỗng", () => {
+  assert.ok(ck.parseCookiesText("\uFEFF.a.com TRUE / TRUE 1793673935 sid abc\r\n").ok);
+  assert.ok(ck.parseCookiesText("www.a.com\tFALSE\t/\tFALSE\t0\t\tvalue").ok);
+});
+test("parse cookies: từ chối JSON, rỗng, rác, quá lớn, không phải string", () => {
+  for (const bad of ['[{"name":"a"}]', "   ", "hello world", "a".repeat(2 * 1024 * 1024 + 1), 123, null, "a\0b"]) assert.ok(!ck.parseCookiesText(bad).ok, String(bad).slice(0, 20));
+});
+test("isCookieBrowser: chỉ nhận whitelist", () => {
+  for (const b of ["none", "firefox", "edge", "chrome", "brave"]) assert.ok(ck.isCookieBrowser(b), b);
+  for (const b of ["", "safari", "firefox --evil", "../x", null, 1, undefined, "FIREFOX"]) assert.ok(!ck.isCookieBrowser(b), String(b));
+});
+test("usesBrowserCookies: chỉ Douyin/TikTok (kể cả subdomain), không khớp hậu tố giả", () => {
+  for (const u of ["https://www.douyin.com/video/1", "https://v.douyin.com/AbC/", "https://www.iesdouyin.com/share/video/1", "https://www.tiktok.com/@a/video/1", "https://vm.tiktok.com/Z/"])
+    assert.ok(ck.usesBrowserCookies(u), u);
+  for (const u of ["https://www.youtube.com/watch?v=a", "https://evildouyin.com/x", "https://douyin.com.evil.io/x", "https://facebook.com/x", "không phải url"])
+    assert.ok(!ck.usesBrowserCookies(u), u);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
 })();

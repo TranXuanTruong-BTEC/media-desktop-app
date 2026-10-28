@@ -4,8 +4,8 @@
 import { ipcMain, BrowserWindow, dialog } from "electron";
 import fs from "fs";
 import { IPC, CookiesResult, CookiesStatus } from "../../shared/ipc-types.js";
-import { getCookiesPath } from "../core/downloader.js";
-import { parseCookiesText, MAX_COOKIES_BYTES } from "../core/cookies.js";
+import { getCookiesPath, getCookieBrowser, setCookieBrowser } from "../core/downloader.js";
+import { parseCookiesText, isCookieBrowser, MAX_COOKIES_BYTES } from "../core/cookies.js";
 import { logger } from "../core/logger.js";
 import { isTrustedSender } from "./guard.js";
 
@@ -13,13 +13,15 @@ const MAX_DOMAINS_SHOWN = 8;
 
 function readStatus(): CookiesStatus {
   const file = getCookiesPath();
-  const empty: CookiesStatus = { exists: false, count: 0, domains: [], totalDomains: 0, updatedAt: null };
+  const browser = getCookieBrowser();
+  const empty: CookiesStatus = { browser, exists: false, count: 0, domains: [], totalDomains: 0, updatedAt: null };
   try {
     const stat = fs.statSync(file);
     if (!stat.isFile() || stat.size > MAX_COOKIES_BYTES) return empty;
     const parsed = parseCookiesText(fs.readFileSync(file, "utf8"));
     if (!parsed.ok) return empty;
     return {
+      browser,
       exists: true,
       count: parsed.summary.count,
       domains: parsed.summary.domains.slice(0, MAX_DOMAINS_SHOWN),
@@ -75,6 +77,19 @@ export function registerCookiesHandlers(win: BrowserWindow) {
     } catch (err) {
       logger.warn("ipc:cookies", "Không đọc được file đã chọn", { err });
       return { ok: false, error: "Không đọc được file đã chọn." };
+    }
+  });
+
+  ipcMain.handle(IPC.COOKIES_SET_BROWSER, (evt, browser: unknown): CookiesResult => {
+    if (!isTrustedSender(evt, win, IPC.COOKIES_SET_BROWSER)) return { ok: false, error: "Yêu cầu bị từ chối." };
+    if (!isCookieBrowser(browser)) return { ok: false, error: "Trình duyệt không hợp lệ." };
+    try {
+      setCookieBrowser(browser);
+      logger.info("ipc:cookies", "Đã đổi nguồn cookies trình duyệt", { browser });
+      return { ok: true, status: readStatus() };
+    } catch (err) {
+      logger.error("ipc:cookies", "Không lưu được lựa chọn trình duyệt", err);
+      return { ok: false, error: "Không lưu được lựa chọn. Hãy thử lại." };
     }
   });
 

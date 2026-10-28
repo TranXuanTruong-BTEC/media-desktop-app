@@ -2,6 +2,25 @@
 // Kiểm tra + chuẩn hoá cookies.txt (định dạng Netscape) do người dùng dán / chọn file.
 // Thuần logic, không phụ thuộc electron → dễ test.
 
+export const COOKIE_BROWSERS: readonly string[] = ["none", "firefox", "edge", "chrome", "brave"];
+
+export function isCookieBrowser(v: unknown): v is "none" | "firefox" | "edge" | "chrome" | "brave" {
+  return typeof v === "string" && COOKIE_BROWSERS.includes(v);
+}
+
+/**
+ * Các trang dùng cookies đọc trực tiếp từ trình duyệt (yt-dlp không tự ký được request của Douyin,
+ * nên cần phiên trình duyệt thật). Trang khác vẫn dùng file cookies.txt như bình thường.
+ */
+const BROWSER_COOKIE_HOSTS = ["douyin.com", "iesdouyin.com", "tiktok.com"];
+
+export function usesBrowserCookies(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return BROWSER_COOKIE_HOSTS.some(d => h === d || h.endsWith("." + d));
+  } catch { return false; }
+}
+
 export const MAX_COOKIES_BYTES = 2 * 1024 * 1024; // 2 MB
 export const COOKIES_HEADER = "# Netscape HTTP Cookie File";
 

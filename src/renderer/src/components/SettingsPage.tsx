@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { YtdlpUpdaterState } from "../hooks/useYtdlpUpdater";
 import { UpdaterState } from "../hooks/useUpdater";
-import type { CookiesStatus, CookiesResult } from "../../../shared/ipc-types";
+import type { CookiesStatus, CookiesResult, CookieBrowser } from "../../../shared/ipc-types";
 
 interface Props {
   outputDir: string;
@@ -34,6 +34,14 @@ function Card({
     </section>
   );
 }
+
+const BROWSER_OPTIONS: { value: CookieBrowser; label: string }[] = [
+  { value: "none",    label: "Không dùng (chỉ dùng cookies dán bên dưới)" },
+  { value: "firefox", label: "Firefox (khuyên dùng)" },
+  { value: "edge",    label: "Microsoft Edge" },
+  { value: "chrome",  label: "Google Chrome" },
+  { value: "brave",   label: "Brave" },
+];
 
 const COOKIES_PLACEHOLDER =
   "# Netscape HTTP Cookie File\n.tiktok.com\tTRUE\t/\tTRUE\t1793673935\tten_cookie\tgia_tri";
@@ -84,6 +92,10 @@ function CookiesCard() {
     if (r?.ok) setText("");   // không giữ cookie trong bộ nhớ giao diện sau khi đã lưu
   };
 
+  const handleBrowser = (b: CookieBrowser) =>
+    void run(() => window.api.setCookieBrowser(b), s =>
+      s.browser === "none" ? "Đã tắt lấy cookies từ trình duyệt." : "Đã lưu. Link Douyin/TikTok sẽ dùng cookies từ trình duyệt này.");
+
   const handleClear = () => {
     if (!confirmClear) {
       setConfirmClear(true);
@@ -103,6 +115,26 @@ function CookiesCard() {
       title="Cookies đăng nhập"
       hint="Dùng cho các trang yêu cầu đăng nhập hoặc cookie mới (Douyin, TikTok, nội dung giới hạn...). Chỉ lưu trên máy này."
     >
+      <div className="mb-4 pb-4 border-b border-[#252a38]">
+        <label className="block text-[12px] text-text mb-1" htmlFor="cookie-browser">
+          Lấy cookies trực tiếp từ trình duyệt
+        </label>
+        <select
+          id="cookie-browser"
+          value={status?.browser ?? "none"}
+          disabled={busy || !status}
+          onChange={e => handleBrowser(e.target.value as CookieBrowser)}
+          className="w-full h-8 px-2 bg-[#0f1117] border border-[#3a4258] focus:border-accent outline-none rounded text-[12px] text-subtle disabled:opacity-50"
+        >
+          {BROWSER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
+          Cách này hay chạy được với Douyin hơn việc dán file. Hãy đăng nhập douyin.com bằng trình duyệt đã chọn
+          (xem 1–2 video cho cookies “tươi”). Chrome/Edge bản mới trên Windows thường mã hoá cookies nên có thể không đọc được — nên dùng Firefox.
+          Chỉ áp dụng cho link Douyin/TikTok.
+        </p>
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <p className="flex-1 min-w-[160px] text-[12px] text-subtle">
           {hasCookies
