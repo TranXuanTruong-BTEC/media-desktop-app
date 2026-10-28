@@ -1,4 +1,4 @@
-import type { DownloadRequest, DownloadProgress, DownloadComplete, DownloadError, CookiesStatus, CookiesResult, CookieBrowser } from "../../shared/ipc-types";
+import type { DownloadRequest, DownloadProgress, DownloadComplete, DownloadError, CookiesStatus, CookiesResult, CookieBrowser, CookieSite } from "../../shared/ipc-types";
 
 declare global {
   interface Window {
@@ -16,6 +16,7 @@ declare global {
       importCookies:    () => Promise<CookiesResult>;
       clearCookies:     () => Promise<CookiesResult>;
       setCookieBrowser: (b: CookieBrowser) => Promise<CookiesResult>;
+      loginCookies:     (site: CookieSite) => Promise<CookiesResult>;
       winMinimize: () => void;
       winMaximize: () => void;
       winClose:    () => void;

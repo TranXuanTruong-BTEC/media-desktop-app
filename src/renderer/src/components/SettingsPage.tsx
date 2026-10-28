@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { YtdlpUpdaterState } from "../hooks/useYtdlpUpdater";
 import { UpdaterState } from "../hooks/useUpdater";
-import type { CookiesStatus, CookiesResult, CookieBrowser } from "../../../shared/ipc-types";
+import type { CookiesStatus, CookiesResult, CookieBrowser, CookieSite } from "../../../shared/ipc-types";
 
 interface Props {
   outputDir: string;
@@ -49,7 +49,7 @@ const COOKIES_PLACEHOLDER =
 function CookiesCard() {
   const [status, setStatus]   = useState<CookiesStatus | null>(null);
   const [text, setText]       = useState("");
-  const [busy, setBusy]       = useState(false);
+  const [busy, setBusy]       = useState<"login" | "other" | null>(null);
   const [msg, setMsg]         = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -59,41 +59,47 @@ function CookiesCard() {
     return () => { if (clearTimer.current) clearTimeout(clearTimer.current); };
   }, []);
 
-  const applyResult = (r: CookiesResult, okMessage: (s: CookiesStatus) => string) => {
-    if (r.canceled) return;
-    if (r.ok && r.status) {
-      setStatus(r.status);
-      setMsg({ ok: true, text: okMessage(r.status) });
-    } else {
-      setMsg({ ok: false, text: r.error ?? "Có lỗi xảy ra." });
-    }
-  };
-
-  const run = async (fn: () => Promise<CookiesResult>, okMessage: (s: CookiesStatus) => string) => {
+  const run = async (
+    kind: "login" | "other",
+    fn: () => Promise<CookiesResult>,
+    okMessage: (s: CookiesStatus, r: CookiesResult) => string,
+  ) => {
     if (busy) return;
-    setBusy(true);
+    setBusy(kind);
     setMsg(null);
     try {
       const r = await fn();
-      applyResult(r, okMessage);
+      if (r.canceled) return r;
+      if (r.ok && r.status) {
+        setStatus(r.status);
+        setMsg({ ok: true, text: okMessage(r.status, r) });
+      } else {
+        setMsg({ ok: false, text: r.error ?? "Có lỗi xảy ra." });
+      }
       return r;
     } catch {
       setMsg({ ok: false, text: "Có lỗi xảy ra. Hãy thử lại." });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
   const savedMsg = (s: CookiesStatus) => `Đã lưu ${s.count} cookie từ ${s.totalDomains} trang.`;
 
+  const handleLogin = (site: CookieSite) =>
+    void run("login", () => window.api.loginCookies(site), (_s, r) =>
+      r.loggedIn
+        ? `Đã đăng nhập và lưu ${r.count ?? 0} cookie. Giờ bạn có thể tải lại link.`
+        : `Đã lưu ${r.count ?? 0} cookie (bạn chưa đăng nhập). Nếu vẫn lỗi, hãy bấm lại và đăng nhập.`);
+
   const handleSave = async () => {
     if (!text.trim()) { setMsg({ ok: false, text: "Hãy dán nội dung cookies.txt vào ô bên trên." }); return; }
-    const r = await run(() => window.api.saveCookies(text), savedMsg);
+    const r = await run("other", () => window.api.saveCookies(text), savedMsg);
     if (r?.ok) setText("");   // không giữ cookie trong bộ nhớ giao diện sau khi đã lưu
   };
 
   const handleBrowser = (b: CookieBrowser) =>
-    void run(() => window.api.setCookieBrowser(b), s =>
+    void run("other", () => window.api.setCookieBrowser(b), s =>
       s.browser === "none" ? "Đã tắt lấy cookies từ trình duyệt." : "Đã lưu. Link Douyin/TikTok sẽ dùng cookies từ trình duyệt này.");
 
   const handleClear = () => {
@@ -104,7 +110,7 @@ function CookiesCard() {
     }
     if (clearTimer.current) clearTimeout(clearTimer.current);
     setConfirmClear(false);
-    void run(() => window.api.clearCookies(), () => "Đã xoá cookies.");
+    void run("other", () => window.api.clearCookies(), () => "Đã xoá cookies và đăng xuất.");
   };
 
   const hasCookies = !!status?.exists;
@@ -113,39 +119,19 @@ function CookiesCard() {
   return (
     <Card
       title="Cookies đăng nhập"
-      hint="Dùng cho các trang yêu cầu đăng nhập hoặc cookie mới (Douyin, TikTok, nội dung giới hạn...). Chỉ lưu trên máy này."
+      hint="Một số trang (Douyin, TikTok...) cần đăng nhập mới tải được. Bấm nút bên dưới, app sẽ tự lấy cookies cho bạn."
     >
-      <div className="mb-4 pb-4 border-b border-[#252a38]">
-        <label className="block text-[12px] text-text mb-1" htmlFor="cookie-browser">
-          Lấy cookies trực tiếp từ trình duyệt
-        </label>
-        <select
-          id="cookie-browser"
-          value={status?.browser ?? "none"}
-          disabled={busy || !status}
-          onChange={e => handleBrowser(e.target.value as CookieBrowser)}
-          className="w-full h-8 px-2 bg-[#0f1117] border border-[#3a4258] focus:border-accent outline-none rounded text-[12px] text-subtle disabled:opacity-50"
-        >
-          {BROWSER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
-          Cách này hay chạy được với Douyin hơn việc dán file. Hãy đăng nhập douyin.com bằng trình duyệt đã chọn
-          (xem 1–2 video cho cookies “tươi”). Chrome/Edge bản mới trên Windows thường mã hoá cookies nên có thể không đọc được — nên dùng Firefox.
-          Chỉ áp dụng cho link Douyin/TikTok.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <p className="flex-1 min-w-[160px] text-[12px] text-subtle">
           {hasCookies
-            ? `Đang dùng ${status!.count} cookie · ${status!.totalDomains} trang`
+            ? `Đang có ${status!.count} cookie · ${status!.totalDomains} trang`
             : "Chưa có cookies"}
         </p>
         {hasCookies && (
           <button
             type="button"
             onClick={handleClear}
-            disabled={busy}
+            disabled={!!busy}
             className={`${btnBase} ${confirmClear ? "bg-red-500/20 text-red-400" : "bg-[#252a38] hover:bg-[#2f3547] text-subtle hover:text-text"}`}
           >
             {confirmClear ? "Bấm lần nữa để xoá" : "Xoá cookies"}
@@ -153,51 +139,97 @@ function CookiesCard() {
         )}
       </div>
 
-      {hasCookies && status!.domains.length > 0 && (
-        <p className="text-[11px] text-muted mb-2 break-words">
-          {status!.domains.join(", ")}
-          {status!.totalDomains > status!.domains.length ? ` và ${status!.totalDomains - status!.domains.length} trang khác` : ""}
-        </p>
-      )}
-
-      <textarea
-        value={text}
-        onChange={e => setText(e.target.value)}
-        placeholder={COOKIES_PLACEHOLDER}
-        spellCheck={false}
-        autoComplete="off"
-        autoCorrect="off"
-        rows={5}
-        className="w-full resize-y px-3 py-2 bg-[#0f1117] border border-[#3a4258] focus:border-accent outline-none rounded text-[11px] font-mono text-subtle placeholder:text-muted/60"
-      />
-
-      <div className="flex flex-wrap items-center gap-2 mt-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={handleSave}
-          disabled={busy || !text.trim()}
+          onClick={() => handleLogin("douyin")}
+          disabled={!!busy}
           className={`${btnBase} bg-accent/15 hover:bg-accent/25 text-accent font-medium`}
         >
-          {hasCookies ? "Thay bằng cookies mới" : "Lưu cookies"}
+          Đăng nhập Douyin
         </button>
         <button
           type="button"
-          onClick={() => run(() => window.api.importCookies(), savedMsg)}
-          disabled={busy}
-          className={`${btnBase} bg-[#252a38] hover:bg-[#2f3547] text-subtle hover:text-text`}
+          onClick={() => handleLogin("tiktok")}
+          disabled={!!busy}
+          className={`${btnBase} bg-accent/15 hover:bg-accent/25 text-accent font-medium`}
         >
-          Chọn file cookies.txt...
+          Đăng nhập TikTok
         </button>
-        {msg && (
+        {busy === "login" && (
+          <span className="text-[12px] text-subtle">Đang chờ bạn đăng nhập trong cửa sổ vừa mở...</span>
+        )}
+        {busy !== "login" && msg && (
           <span className={`text-[12px] ${msg.ok ? "text-emerald-400" : "text-red-400"}`}>{msg.text}</span>
         )}
       </div>
 
-      <p className="text-[11px] text-muted mt-3 leading-relaxed">
-        Cách lấy: đăng nhập trang web trong trình duyệt, dùng tiện ích “Get cookies.txt LOCALLY” để xuất file
-        (định dạng Netscape), rồi dán nội dung hoặc chọn file ở đây. Cookies tương đương phiên đăng nhập của bạn —
-        đừng chia sẻ cho người khác.
+      <p className="text-[11px] text-muted mt-2 leading-relaxed">
+        Cửa sổ đăng nhập sẽ mở ra. Hãy đăng nhập (có thể quét mã QR bằng app Douyin/TikTok trên điện thoại).
+        Đăng nhập xong app tự lưu cookies và tự đóng cửa sổ — bạn không cần làm gì thêm.
+        Cookies chỉ lưu trên máy này.
       </p>
+
+      <details className="mt-4 pt-3 border-t border-[#252a38] group">
+        <summary className="cursor-pointer select-none text-[12px] text-subtle hover:text-text">
+          Nâng cao: dán cookies thủ công hoặc lấy từ trình duyệt
+        </summary>
+
+        <div className="mt-3 mb-4 pb-4 border-b border-[#252a38]">
+          <label className="block text-[12px] text-text mb-1" htmlFor="cookie-browser">
+            Lấy cookies trực tiếp từ trình duyệt
+          </label>
+          <select
+            id="cookie-browser"
+            value={status?.browser ?? "none"}
+            disabled={!!busy || !status}
+            onChange={e => handleBrowser(e.target.value as CookieBrowser)}
+            className="w-full h-8 px-2 bg-[#0f1117] border border-[#3a4258] focus:border-accent outline-none rounded text-[12px] text-subtle disabled:opacity-50"
+          >
+            {BROWSER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
+            Dành cho người dùng quen kỹ thuật. Chrome/Edge bản mới trên Windows thường mã hoá cookies nên có thể không
+            đọc được — nên dùng Firefox. Chỉ áp dụng cho link Douyin/TikTok.
+          </p>
+        </div>
+
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          placeholder={COOKIES_PLACEHOLDER}
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          rows={5}
+          className="w-full resize-y px-3 py-2 bg-[#0f1117] border border-[#3a4258] focus:border-accent outline-none rounded text-[11px] font-mono text-subtle placeholder:text-muted/60"
+        />
+
+        <div className="flex flex-wrap items-center gap-2 mt-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!!busy || !text.trim()}
+            className={`${btnBase} bg-accent/15 hover:bg-accent/25 text-accent font-medium`}
+          >
+            {hasCookies ? "Thay bằng cookies mới" : "Lưu cookies"}
+          </button>
+          <button
+            type="button"
+            onClick={() => run("other", () => window.api.importCookies(), savedMsg)}
+            disabled={!!busy}
+            className={`${btnBase} bg-[#252a38] hover:bg-[#2f3547] text-subtle hover:text-text`}
+          >
+            Chọn file cookies.txt...
+          </button>
+        </div>
+
+        <p className="text-[11px] text-muted mt-3 leading-relaxed">
+          Cách lấy thủ công: đăng nhập trang web trong trình duyệt, dùng tiện ích “Get cookies.txt LOCALLY” để xuất file
+          (định dạng Netscape), rồi dán nội dung hoặc chọn file ở đây. Cookies tương đương phiên đăng nhập của bạn —
+          đừng chia sẻ cho người khác.
+        </p>
+      </details>
     </Card>
   );
 }

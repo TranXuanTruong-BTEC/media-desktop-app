@@ -21,6 +21,89 @@ export function usesBrowserCookies(url: string): boolean {
   } catch { return false; }
 }
 
+// ─── Tự lấy cookies qua cửa sổ đăng nhập ─────────────────────────────────────
+
+export type CookieSiteKey = "douyin" | "tiktok";
+
+export const COOKIE_SITES: Record<CookieSiteKey, { url: string; domains: readonly string[]; title: string }> = {
+  douyin: { url: "https://www.douyin.com/", domains: ["douyin.com", "iesdouyin.com"], title: "Đăng nhập Douyin" },
+  tiktok: { url: "https://www.tiktok.com/", domains: ["tiktok.com"],                   title: "Đăng nhập TikTok" },
+};
+
+export function isCookieSite(v: unknown): v is CookieSiteKey {
+  return typeof v === "string" && Object.prototype.hasOwnProperty.call(COOKIE_SITES, v);
+}
+
+/** Cookie như Electron trả về từ session.cookies.get() (chỉ các trường ta cần). */
+export interface BrowserCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  hostOnly?: boolean;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  session?: boolean;
+  expirationDate?: number; // giây (có thể lẻ)
+}
+
+export function domainMatches(domain: string, suffixes: readonly string[]): boolean {
+  const d = domain.replace(/^#HttpOnly_/, "").replace(/^\./, "").toLowerCase();
+  return suffixes.some(s => d === s || d.endsWith("." + s));
+}
+
+/** Đã đăng nhập khi có cookie `sessionid` không rỗng thuộc tên miền của trang. */
+export function isLoggedIn(cookies: readonly BrowserCookie[], suffixes: readonly string[]): boolean {
+  return cookies.some(c => c.name === "sessionid" && !!c.value && !!c.domain && domainMatches(c.domain, suffixes));
+}
+
+/** Đổi cookie của trình duyệt sang các dòng Netscape; chỉ giữ cookie thuộc `suffixes`, bỏ cookie đã hết hạn. */
+export function toNetscapeLines(
+  cookies: readonly BrowserCookie[],
+  suffixes: readonly string[],
+  nowSec: number = Math.floor(Date.now() / 1000),
+): string[] {
+  const out: string[] = [];
+  for (const c of cookies) {
+    if (!c.domain || !domainMatches(c.domain, suffixes)) continue;
+    const path = c.path || "/";
+    if (/[\t\r\n\0]/.test(c.name + c.value + path + c.domain)) continue;
+    const isSession = !!c.session || !c.expirationDate;
+    if (!isSession && Math.floor(c.expirationDate as number) <= nowSec) continue;
+    const includeSub = !c.hostOnly;
+    const dom = (includeSub ? "." : "") + c.domain.replace(/^\./, "");
+    out.push([
+      (c.httpOnly ? "#HttpOnly_" : "") + dom,
+      includeSub ? "TRUE" : "FALSE",
+      path,
+      c.secure ? "TRUE" : "FALSE",
+      String(isSession ? 0 : Math.floor(c.expirationDate as number)),
+      c.name,
+      c.value,
+    ].join("\t"));
+  }
+  return out;
+}
+
+/** Thay toàn bộ cookie thuộc `suffixes` trong file cũ bằng `newLines`; cookie của trang khác giữ nguyên. */
+export function mergeCookieText(existing: string | null, newLines: readonly string[], suffixes: readonly string[]): string {
+  const kept: string[] = [];
+  if (existing) {
+    for (const raw of existing.split(/\r?\n/)) {
+      const line = raw.replace(/\s+$/, "");
+      if (!line || (line.startsWith("#") && !line.startsWith("#HttpOnly_"))) continue;
+      if (domainMatches(line.split("\t")[0], suffixes)) continue;
+      kept.push(line);
+    }
+  }
+  return `${COOKIES_HEADER}\n${[...kept, ...newLines].join("\n")}\n`;
+}
+
+/** User-Agent chỉ gồm ký tự in được, độ dài hợp lý (được truyền cho yt-dlp qua --user-agent). */
+export function isSafeUserAgent(v: unknown): v is string {
+  return typeof v === "string" && /^[\x20-\x7E]{10,300}$/.test(v);
+}
+
 export const MAX_COOKIES_BYTES = 2 * 1024 * 1024; // 2 MB
 export const COOKIES_HEADER = "# Netscape HTTP Cookie File";
 

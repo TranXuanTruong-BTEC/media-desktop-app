@@ -194,6 +194,49 @@ test("usesBrowserCookies: chỉ Douyin/TikTok (kể cả subdomain), không kh�
     assert.ok(!ck.usesBrowserCookies(u), u);
 });
 
+console.log("cookies (tự lấy qua cửa sổ đăng nhập)");
+const NOW = 1_800_000_000;
+const sample = [
+  { name: "sessionid", value: "abc", domain: ".douyin.com", hostOnly: false, path: "/", secure: true, httpOnly: true, session: false, expirationDate: NOW + 1000 },
+  { name: "s_v_web_id", value: "v1", domain: "www.douyin.com", hostOnly: true, path: "/", secure: false, httpOnly: false, session: true },
+  { name: "old", value: "x", domain: ".douyin.com", hostOnly: false, path: "/", secure: false, httpOnly: false, session: false, expirationDate: NOW - 5 },
+  { name: "track", value: "t", domain: ".google.com", hostOnly: false, path: "/", secure: true, httpOnly: false, session: false, expirationDate: NOW + 99 },
+  { name: "evil", value: "a\tb", domain: ".douyin.com", hostOnly: false, path: "/", secure: false, httpOnly: false, session: true },
+];
+test("isCookieSite: chỉ douyin / tiktok", () => {
+  assert.ok(ck.isCookieSite("douyin") && ck.isCookieSite("tiktok"));
+  for (const v of ["youtube", "", "__proto__", "constructor", null, 1]) assert.ok(!ck.isCookieSite(v), String(v));
+});
+test("domainMatches: khớp subdomain, không khớp hậu tố giả / tên miền khác", () => {
+  const d = ["douyin.com"];
+  for (const x of [".douyin.com", "www.douyin.com", "#HttpOnly_.douyin.com", "douyin.com"]) assert.ok(ck.domainMatches(x, d), x);
+  for (const x of ["evildouyin.com", "douyin.com.evil.io", ".google.com", ""]) assert.ok(!ck.domainMatches(x, d), x);
+});
+test("isLoggedIn: cần cookie sessionid không rỗng đúng tên miền", () => {
+  assert.ok(ck.isLoggedIn(sample, ["douyin.com"]));
+  assert.ok(!ck.isLoggedIn(sample, ["tiktok.com"]));
+  assert.ok(!ck.isLoggedIn([{ name: "sessionid", value: "", domain: ".douyin.com" }], ["douyin.com"]));
+});
+test("toNetscapeLines: đúng 7 cột, HttpOnly, session=0, bỏ hết hạn / tên miền khác / ký tự lạ", () => {
+  const lines = ck.toNetscapeLines(sample, ["douyin.com"], NOW);
+  assert.strictEqual(lines.length, 2);
+  assert.deepStrictEqual(lines[0].split("\t"), ["#HttpOnly_.douyin.com", "TRUE", "/", "TRUE", String(NOW + 1000), "sessionid", "abc"]);
+  assert.deepStrictEqual(lines[1].split("\t"), ["www.douyin.com", "FALSE", "/", "FALSE", "0", "s_v_web_id", "v1"]);
+  const parsed = ck.parseCookiesText(lines.join("\n"));
+  assert.ok(parsed.ok && parsed.summary.count === 2);   // chạy lại qua bộ parse của app vẫn hợp lệ
+});
+test("mergeCookieText: thay cookie của trang, giữ cookie trang khác, bỏ chú thích cũ", () => {
+  const existing = "# Netscape HTTP Cookie File\n.douyin.com\tTRUE\t/\tTRUE\t99\told\t1\n.youtube.com\tTRUE\t/\tTRUE\t99\tyt\t2\n";
+  const merged = ck.mergeCookieText(existing, ck.toNetscapeLines(sample, ["douyin.com"], NOW), ["douyin.com"]);
+  assert.ok(merged.startsWith("# Netscape HTTP Cookie File\n"));
+  assert.ok(merged.includes("\tyt\t2") && !merged.includes("\told\t1") && merged.includes("\tsessionid\tabc"));
+  assert.strictEqual(ck.mergeCookieText(null, ["a.com\tFALSE\t/\tFALSE\t0\tn\tv"], ["douyin.com"]).split("\n").length, 3);
+});
+test("isSafeUserAgent: nhận UA Chrome, từ chối rỗng / xuống dòng / quá dài / không phải string", () => {
+  assert.ok(ck.isSafeUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
+  for (const v of ["", "short", "Mozilla/5.0\nX-Evil: 1 aaaaaaaa", "a".repeat(301), "Mozilla/5.0 (Windows) tiếng Việt", null, 5]) assert.ok(!ck.isSafeUserAgent(v), String(v).slice(0, 20));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
 })();

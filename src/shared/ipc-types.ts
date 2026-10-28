@@ -22,6 +22,7 @@ export const IPC = {
   COOKIES_IMPORT:    "cookies:import",
   COOKIES_CLEAR:     "cookies:clear",
   COOKIES_SET_BROWSER: "cookies:setBrowser",
+  COOKIES_LOGIN:     "cookies:login",
 } as const;
 
 export type VideoQuality = "bestvideo+bestaudio" | "1080p" | "720p" | "480p" | "360p" | "audio_mp3" | "audio_m4a";
@@ -63,6 +64,9 @@ export interface DownloadError {
 /** Trình duyệt để yt-dlp đọc cookies trực tiếp (--cookies-from-browser). "none" = không dùng. */
 export type CookieBrowser = "none" | "firefox" | "edge" | "chrome" | "brave";
 
+/** Trang có cửa sổ đăng nhập để app tự lấy cookies. */
+export type CookieSite = "douyin" | "tiktok";
+
 export interface CookiesStatus {
   browser: CookieBrowser;
   exists: boolean;
@@ -76,6 +80,8 @@ export interface CookiesResult {
   ok: boolean;
   error?: string;
   canceled?: boolean;
+  loggedIn?: boolean;   // chỉ có ở kết quả của cửa sổ đăng nhập
+  count?: number;      // số cookie vừa lấy được
   status?: CookiesStatus;
 }
 

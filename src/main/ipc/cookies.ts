@@ -4,8 +4,12 @@
 import { ipcMain, BrowserWindow, dialog } from "electron";
 import fs from "fs";
 import { IPC, CookiesResult, CookiesStatus } from "../../shared/ipc-types.js";
-import { getCookiesPath, getCookieBrowser, setCookieBrowser } from "../core/downloader.js";
-import { parseCookiesText, isCookieBrowser, MAX_COOKIES_BYTES } from "../core/cookies.js";
+import { getCookiesPath, getCookieBrowser, setCookieBrowser, setCookieUserAgent, clearCookieUserAgent } from "../core/downloader.js";
+import {
+  parseCookiesText, isCookieBrowser, isCookieSite, toNetscapeLines, mergeCookieText,
+  COOKIE_SITES, MAX_COOKIES_BYTES,
+} from "../core/cookies.js";
+import { runCookieLogin, clearLoginSession } from "../core/cookie-login.js";
 import { logger } from "../core/logger.js";
 import { isTrustedSender } from "./guard.js";
 
@@ -93,10 +97,48 @@ export function registerCookiesHandlers(win: BrowserWindow) {
     }
   });
 
-  ipcMain.handle(IPC.COOKIES_CLEAR, (evt): CookiesResult => {
+  // Tự lấy cookies: mở cửa sổ đăng nhập → đọc cookies của phiên → gộp vào cookies.txt
+  ipcMain.handle(IPC.COOKIES_LOGIN, async (evt, site: unknown): Promise<CookiesResult> => {
+    if (!isTrustedSender(evt, win, IPC.COOKIES_LOGIN)) return { ok: false, error: "Yêu cầu bị từ chối." };
+    if (!isCookieSite(site)) return { ok: false, error: "Trang không hợp lệ." };
+
+    let outcome;
+    try {
+      outcome = await runCookieLogin(win, site);
+    } catch {
+      return { ok: false, error: "Cửa sổ đăng nhập đang mở. Hãy hoàn tất hoặc đóng nó trước." };
+    }
+
+    const cfg = COOKIE_SITES[site];
+    const lines = toNetscapeLines(outcome.cookies, cfg.domains);
+    if (lines.length === 0) {
+      return { ok: false, error: "Chưa lấy được cookies. Hãy thử lại và chờ trang tải xong trước khi đóng cửa sổ." };
+    }
+
+    let existing: string | null = null;
+    try {
+      const f = getCookiesPath();
+      if (fs.existsSync(f) && fs.statSync(f).size <= MAX_COOKIES_BYTES) existing = fs.readFileSync(f, "utf8");
+    } catch { existing = null; }
+
+    const saved = saveCookies(mergeCookieText(existing, lines, cfg.domains));
+    if (!saved.ok) return saved;
+
+    try {
+      setCookieBrowser("none");                       // cookies vừa lấy là nguồn mới nhất → bỏ lựa chọn trình duyệt cũ
+      setCookieUserAgent(outcome.userAgent);          // yt-dlp dùng đúng UA của cửa sổ đăng nhập cho Douyin/TikTok
+    } catch (err) { logger.warn("ipc:cookies", "Không lưu được cài đặt đi kèm", { err }); }
+
+    logger.info("ipc:cookies", "Đã lấy cookies qua cửa sổ đăng nhập", { site, count: lines.length, loggedIn: outcome.loggedIn });
+    return { ok: true, loggedIn: outcome.loggedIn, count: lines.length, status: readStatus() };
+  });
+
+  ipcMain.handle(IPC.COOKIES_CLEAR, async (evt): Promise<CookiesResult> => {
     if (!isTrustedSender(evt, win, IPC.COOKIES_CLEAR)) return { ok: false, error: "Yêu cầu bị từ chối." };
     try {
       fs.rmSync(getCookiesPath(), { force: true });
+      clearCookieUserAgent();
+      await clearLoginSession();                      // đăng xuất khỏi cửa sổ đăng nhập
       logger.info("ipc:cookies", "Đã xoá cookies");
       return { ok: true, status: readStatus() };
     } catch (err) {

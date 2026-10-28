@@ -20,7 +20,7 @@ import {
   CookieBrowser,
 } from "../../shared/ipc-types.js";
 import { logger } from "./logger.js";
-import { isCookieBrowser, usesBrowserCookies } from "./cookies.js";
+import { isCookieBrowser, usesBrowserCookies, isSafeUserAgent } from "./cookies.js";
 import {
   isValidDownloadUrl, VALID_QUALITIES, escapeOutputTemplate, appendCapped, redactUrl,
 } from "./security.js";
@@ -103,8 +103,8 @@ function summarizeError(stderr: string, stdout = ""): string {
            browserLine.slice(0, 200);
   }
   if (lines.some(l => /fresh cookies/i.test(l))) {
-    return "Trang này yêu cầu cookie mới. Vào Cài đặt → Cookies đăng nhập: chọn \"Lấy cookies từ trình duyệt\" (khuyên dùng Firefox, " +
-           "đã đăng nhập douyin.com) hoặc dán cookies.txt (định dạng Netscape), rồi bấm tải lại.";
+    return "Trang này yêu cầu cookie mới. Vào Cài đặt → Cookies đăng nhập, bấm \"Đăng nhập Douyin\" " +
+           "để app tự lấy cookies mới, rồi bấm tải lại.";
   }
   const hint = lines.find(l => /n challenge solving failed|no supported javascript runtime|requested format is not available|sign in to confirm/i.test(l));
   if (hint) return hint;
@@ -137,11 +137,40 @@ export function setCookieBrowser(b: CookieBrowser): void {
   fs.writeFileSync(getCookieBrowserPath(), b, "utf8");
 }
 
-/** Douyin/TikTok: ưu tiên cookies từ trình duyệt đã chọn; còn lại dùng file cookies.txt nếu có. */
+function getCookieUserAgentPath(): string {
+  return path.join(app.getPath("userData"), "cookie-ua.txt");
+}
+
+/** UA của cửa sổ đăng nhập đã lấy cookies (cookie chữ ký của Douyin gắn với UA) — null nếu chưa có. */
+export function getCookieUserAgent(): string | null {
+  try {
+    const v = fs.readFileSync(getCookieUserAgentPath(), "utf8").trim();
+    return isSafeUserAgent(v) ? v : null;
+  } catch { return null; }
+}
+
+export function setCookieUserAgent(ua: string): void {
+  if (!isSafeUserAgent(ua)) throw new Error("invalid user agent");
+  fs.writeFileSync(getCookieUserAgentPath(), ua, "utf8");
+}
+
+export function clearCookieUserAgent(): void {
+  try { fs.rmSync(getCookieUserAgentPath(), { force: true }); } catch { /* ignore */ }
+}
+
+/**
+ * Douyin/TikTok: ưu tiên cookies từ trình duyệt đã chọn; nếu không thì dùng file cookies.txt (kèm đúng UA đã
+ * dùng khi lấy cookies). Trang khác: chỉ dùng file cookies.txt nếu có.
+ */
 function cookieArgs(url: string): string[] {
+  const special = usesBrowserCookies(url);
   const browser = getCookieBrowser();
-  if (browser !== "none" && usesBrowserCookies(url)) return ["--cookies-from-browser", browser];
-  return fs.existsSync(getCookiesPath()) ? ["--cookies", getCookiesPath()] : [];
+  if (browser !== "none" && special) return ["--cookies-from-browser", browser];
+  if (!fs.existsSync(getCookiesPath())) return [];
+  const args = ["--cookies", getCookiesPath()];
+  const ua = special ? getCookieUserAgent() : null;
+  if (ua) args.push("--user-agent", ua);
+  return args;
 }
 
 // ─── Tool paths ───────────────────────────────────────────────────────────────
