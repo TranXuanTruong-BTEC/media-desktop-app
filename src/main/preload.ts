@@ -1,5 +1,5 @@
 // src/main/preload.ts — standalone, zero cross-folder imports
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const IPC = {
   DOWNLOAD_START:    "download:start",
@@ -64,6 +64,31 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on(IPC.UPDATER_STATUS, fn);
     return () => ipcRenderer.removeListener(IPC.UPDATER_STATUS, fn);
   },
+
+  // Trích xuất văn bản (tiếng Trung → transcript.srt)
+  getPathForFile:       (f: File) => { try { return webUtils.getPathForFile(f); } catch { return ""; } },
+  transcribeInfo:       ()                       => ipcRenderer.invoke("transcribe:info"),
+  transcribeSelectFile: ()                       => ipcRenderer.invoke("transcribe:selectFile"),
+  transcribeStart:      (req: unknown)           => ipcRenderer.invoke("transcribe:start", req),
+  transcribeCancel:     (id: string)             => ipcRenderer.invoke("transcribe:cancel", id),
+  downloadWhisperModel: (id: string)             => ipcRenderer.invoke("transcribe:modelDownload", id),
+  cancelModelDownload:  (id: string)             => ipcRenderer.invoke("transcribe:modelCancel", id),
+  onTranscribeProgress: (cb: (p: unknown) => void) => {
+    const fn = (_: unknown, p: unknown) => cb(p);
+    ipcRenderer.on("transcribe:progress", fn);
+    return () => ipcRenderer.removeListener("transcribe:progress", fn);
+  },
+  onModelProgress: (cb: (p: unknown) => void) => {
+    const fn = (_: unknown, p: unknown) => cb(p);
+    ipcRenderer.on("transcribe:modelProgress", fn);
+    return () => ipcRenderer.removeListener("transcribe:modelProgress", fn);
+  },
+
+  // Cookie Douyin (nhập trong Cài đặt)
+  getCookiesStatus:  ()            => ipcRenderer.invoke("cookies:status"),
+  importCookiesFile: ()            => ipcRenderer.invoke("cookies:importFile"),
+  importCookiesText: (t: string)   => ipcRenderer.invoke("cookies:importText", t),
+  clearCookies:      ()            => ipcRenderer.invoke("cookies:clear"),
 
   // yt-dlp binary auto-updater
   checkYtdlp:       () => ipcRenderer.invoke("ytdlp-updater:check"),

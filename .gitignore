@@ -5,4 +5,5 @@ release/
 tools/yt-dlp.exe
 tools/node.exe
 tools/ffmpeg.exe
+tools/whisper-cli.exe
 .env

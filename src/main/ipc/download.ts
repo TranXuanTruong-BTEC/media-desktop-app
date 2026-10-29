@@ -5,6 +5,7 @@ import { startDownload } from "../core/downloader.js";
 import { logger } from "../core/logger.js";
 import { isValidId, isValidDownloadUrl, validateOutputDir, VALID_QUALITIES, redactUrl } from "../core/security.js";
 import { isTrustedSender } from "./guard.js";
+import { normalizeDownloadUrl } from "../../shared/url.js";
 
 type CancelFn = (sync?: boolean) => void;
 
@@ -13,7 +14,7 @@ const activeCancels  = new Map<string, CancelFn>();
 const activeProgress = new Map<string, number>();
 
 /** Thư mục người dùng đã chọn qua hộp thoại trong phiên này (cho phép cả đường dẫn UNC). */
-const dialogDirs = new Set<string>();
+export const dialogDirs = new Set<string>();
 
 /** Giới hạn số tiến trình yt-dlp chạy đồng thời ở phía main (renderer chỉ chạy tối đa 3). */
 const MAX_ACTIVE_DOWNLOADS = 8;
@@ -26,11 +27,13 @@ function parseRequest(req: unknown): DownloadRequest | null {
   if (!req || typeof req !== "object") return null;
   const r = req as Partial<DownloadRequest>;
   if (!isValidId(r.id)) return null;
-  if (!isValidDownloadUrl(r.url)) return null;
+  // Làm sạch link (dán dính đôi, đoạn "chia sẻ", Douyin jingxuan?modal_id=) — cả khi retry từ lịch sử cũ.
+  const cleanUrl = typeof r.url === "string" ? normalizeDownloadUrl(r.url) : null;
+  if (!isValidDownloadUrl(cleanUrl)) return null;
   if (typeof r.quality !== "string" || !VALID_QUALITIES.has(r.quality)) return null;
   const outputDir = validateOutputDir(r.outputDir, dialogDirs);
   if (!outputDir) return null;
-  return { id: r.id, url: r.url, quality: r.quality as DownloadRequest["quality"], outputDir };
+  return { id: r.id, url: cleanUrl, quality: r.quality as DownloadRequest["quality"], outputDir };
 }
 
 const send = {

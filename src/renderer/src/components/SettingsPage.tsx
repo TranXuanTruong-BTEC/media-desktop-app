@@ -1,6 +1,7 @@
 import React from "react";
 import { YtdlpUpdaterState } from "../hooks/useYtdlpUpdater";
 import { UpdaterState } from "../hooks/useUpdater";
+import { CookiesCard } from "./CookiesCard";
 
 interface Props {
   outputDir: string;
@@ -123,6 +124,8 @@ export function SettingsPage({
           </div>
         </div>
       </Card>
+
+      <CookiesCard />
 
       <Card title="Trang chủ" hint="Xem thêm các công cụ và tin mới nhất trên trang web của chúng tôi.">
         <div className="flex flex-wrap items-center justify-between gap-2">

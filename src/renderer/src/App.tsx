@@ -12,6 +12,8 @@ import { YtdlpUpdateBanner }   from "./components/YtdlpUpdateBanner";
 import { Sidebar, NavId }      from "./components/Sidebar";
 import { SettingsPage }        from "./components/SettingsPage";
 import { AboutPage }           from "./components/AboutPage";
+import { TranscribePage }       from "./components/TranscribePage";
+import { useTranscribe }        from "./hooks/useTranscribe";
 import { ConfirmDialog }       from "./components/ConfirmDialog";
 import { VideoQuality }        from "../../shared/ipc-types";
 
@@ -43,6 +45,7 @@ export default function App() {
   } = useDownload(outputDir);
   const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
   const { state: ytdlpState, checkNow, forceUpdate, dismiss: dismissYtdlp } = useYtdlpUpdater();
+  const transcribeApi = useTranscribe();
 
   useEffect(() => {
     window.api?.getDefaultDir?.().then(d => { if (d) setOutputDir(d); }).catch(() => {});
@@ -209,7 +212,16 @@ export default function App() {
 
           {nav === "about" && <AboutPage version={appVersion} />}
 
-          {(nav === "convert" || nav === "trim" || nav === "compress" || nav === "audio") && (
+          {nav === "transcribe" && (
+            <TranscribePage
+              t={transcribeApi}
+              outputDir={outputDir}
+              onSelectDir={handleSelectDir}
+              onOpenPath={(p) => (window as any).api?.openPath?.(p)}
+            />
+          )}
+
+          {(nav === "trim" || nav === "compress" || nav === "audio") && (
             <ComingSoon page={nav} />
           )}
         </div>
@@ -277,8 +289,7 @@ function EmptyHistory() {
   );
 }
 
-const COMING_SOON: Record<"convert" | "trim" | "compress" | "audio", { title: string; desc: string }> = {
-  convert:  { title: "Chuyển đổi", desc: "Đổi định dạng video/audio (MP4, MKV, MP3, ...)" },
+const COMING_SOON: Record<"trim" | "compress" | "audio", { title: string; desc: string }> = {
   trim:     { title: "Cắt/Ghép",   desc: "Cắt đoạn video hoặc ghép nhiều file lại với nhau" },
   compress: { title: "Nén file",   desc: "Giảm dung lượng video mà vẫn giữ chất lượng" },
   audio:    { title: "Tách nhạc",  desc: "Tách phần âm thanh ra khỏi video" },

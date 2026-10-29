@@ -30,6 +30,8 @@ const AUDIO_OPTIONS: QualityOption[] = [
 
 const ALL_OPTIONS = [...VIDEO_OPTIONS, ...AUDIO_OPTIONS];
 
+import { normalizeDownloadUrl } from "../../../shared/url";
+
 function isHttpUrl(raw: string): boolean {
   if (raw.length > 2048 || /\s/.test(raw)) return false;
   try {
@@ -145,7 +147,8 @@ export function DownloadForm({ outputDir, onSelectDir, onSubmit, clearKey }: Pro
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const trimmed = url.trim();
+    const trimmed = normalizeDownloadUrl(url) ?? url.trim();
+    if (trimmed !== url.trim()) setUrl(trimmed);
     if (!trimmed) { setError("Vui lòng nhập URL"); return; }
     if (!isHttpUrl(trimmed)) { setError("URL không hợp lệ (chỉ nhận link http/https)"); return; }
     if (!outputDir) { setError("Vui lòng chọn thư mục lưu"); return; }
@@ -168,8 +171,8 @@ export function DownloadForm({ outputDir, onSelectDir, onSubmit, clearKey }: Pro
               value={url}
               onChange={e => { setUrl(e.target.value); setError(""); }}
               onPaste={e => {
-                const pasted = e.clipboardData.getData("text").trim();
-                if (isHttpUrl(pasted)) { setUrl(pasted); setError(""); }
+                const clean = normalizeDownloadUrl(e.clipboardData.getData("text"));
+                if (clean && isHttpUrl(clean)) { e.preventDefault(); setUrl(clean); setError(""); }
               }}
               placeholder="Dán link YouTube, TikTok, Facebook, Twitter..."
               className="w-full h-8 pl-8 pr-3 bg-[#0f1117] border border-[#3a4258] rounded text-[12px] text-text placeholder-muted outline-none focus:border-accent transition-colors"
