@@ -3,7 +3,7 @@ import React from "react";
 export type NavId =
   | "download"
   | "history"
-  | "convert"
+  | "transcribe"
   | "trim"
   | "compress"
   | "audio"
@@ -52,10 +52,11 @@ function IconHistory() {
   );
 }
 
-function IconConvert() {
+function IconTranscribe() {
   return (
     <svg viewBox="0 0 24 24" className={ICON} {...S}>
-      <path d="M4 8h14M14.5 4.5 18 8l-3.5 3.5M20 16H6M9.5 12.5 6 16l3.5 3.5" />
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <path d="M7 11h4M13 11h4M7 15h2.5M12 15h5" />
     </svg>
   );
 }
@@ -122,7 +123,7 @@ export function Sidebar({
   const mainItems: NavItem[] = [
     { id: "download", label: "Tải xuống",  badge: activeDownloads, icon: <IconDownload /> },
     { id: "history",  label: "Lịch sử",    badge: historyCount,    icon: <IconHistory /> },
-    { id: "convert",  label: "Chuyển đổi", icon: <IconConvert /> },
+    { id: "transcribe", label: "Trích văn bản", icon: <IconTranscribe /> },
     { id: "trim",     label: "Cắt/Ghép",   icon: <IconTrim /> },
     { id: "compress", label: "Nén file",   icon: <IconCompress /> },
     { id: "audio",    label: "Tách nhạc",  icon: <IconAudio /> },

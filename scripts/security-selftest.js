@@ -144,6 +144,81 @@ test("appendCapped giữ phần đuôi, không vượt giới hạn", () => {
   assert.strictEqual(b.length, 5000);
 });
 
+
+console.log("normalizeDownloadUrl (Douyin / link dán dính)");
+const urlmod = require("../dist-electron/shared/url.js");
+test("link dán dính đôi (đúng lỗi người dùng gặp) → lấy link đầu", () => {
+  const d = "https://www.douyin.com/jingxuan?modal_id=7697621631518166282";
+  assert.strictEqual(urlmod.normalizeDownloadUrl(d + d), "https://www.douyin.com/video/7697621631518166282");
+});
+test("Douyin modal_id ở mọi trang → /video/ID", () => {
+  for (const u of ["https://www.douyin.com/jingxuan?modal_id=7697621631518166282", "https://www.douyin.com/discover?modal_id=7697621631518166282",
+    "https://www.douyin.com/user/MS4wLjABAAAA?modal_id=7697621631518166282&from_tab_name=main", "https://douyin.com/search/abc?modal_id=7697621631518166282&type=general",
+    "https://www.douyin.com/video/7697621631518166282?previous_page=app_code_link"])
+    assert.strictEqual(urlmod.normalizeDownloadUrl(u), "https://www.douyin.com/video/7697621631518166282", u);
+});
+test("đoạn chia sẻ Douyin (có chữ Trung) → trích link", () => {
+  const share = "7.43 复制打开抖音，看看【某某的作品】电影解说 https://v.douyin.com/AbCdEf1/ 12/05 abc:/ 【打开】";
+  assert.strictEqual(urlmod.normalizeDownloadUrl(share), "https://v.douyin.com/AbCdEf1/");
+});
+test("link khác giữ nguyên; không có link → null; không đụng YouTube/TikTok", () => {
+  assert.strictEqual(urlmod.normalizeDownloadUrl("https://www.youtube.com/watch?v=abc&t=5"), "https://www.youtube.com/watch?v=abc&t=5");
+  assert.strictEqual(urlmod.normalizeDownloadUrl("https://www.tiktok.com/@a/video/123?lang=vi"), "https://www.tiktok.com/@a/video/123?lang=vi");
+  assert.strictEqual(urlmod.normalizeDownloadUrl("không có link"), null);
+  assert.strictEqual(urlmod.normalizeDownloadUrl("javascript:alert(1)"), null);
+  assert.strictEqual(urlmod.normalizeDownloadUrl("https://v.douyin.com/x/https://v.douyin.com/y/"), "https://v.douyin.com/x/");
+});
+
+
+console.log("transcribe-utils (SRT / model / tiến độ)");
+const tu = require("../dist-electron/main/core/transcribe-utils.js");
+test("catalog model hợp lệ (sha1 40 hex, id/file duy nhất, có model mặc định)", () => {
+  const ids = new Set(), files = new Set();
+  for (const m of tu.WHISPER_MODELS) {
+    assert.match(m.sha1, /^[0-9a-f]{40}$/); assert.match(m.file, /^ggml-[a-z0-9._-]+\.bin$/);
+    ids.add(m.id); files.add(m.file); assert.ok(m.sizeMB > 100);
+    assert.strictEqual(new URL(tu.modelUrl(m.file)).hostname, "huggingface.co");
+  }
+  assert.strictEqual(ids.size, tu.WHISPER_MODELS.length); assert.strictEqual(files.size, tu.WHISPER_MODELS.length);
+  assert.strictEqual(tu.getModel("turbo").file, "ggml-large-v3-turbo-q5_0.bin");
+  assert.strictEqual(tu.getModel("../../x"), null);
+});
+test("allowlist redirect của model: HF + CDN .hf.co được, host giả bị chặn", () => {
+  const base = tu.modelUrl("ggml-small.bin");
+  for (const l of ["https://cas-bridge.xethub.hf.co/a?sig=1", "https://cdn-lfs.huggingface.co/x", "/api/resolve-cache/x"])
+    assert.ok(sec.resolveSafeRedirect(l, base, tu.MODEL_HOSTS), l);
+  for (const l of ["http://huggingface.co/x", "https://huggingface.co.evil.com/x", "https://evilhf.co/x", "https://github.com/x"])
+    assert.strictEqual(sec.resolveSafeRedirect(l, base, tu.MODEL_HOSTS), null, l);
+});
+test("isMediaFile chỉ nhận đuôi media", () => {
+  for (const f of ["C:\\v\\a.MP4", "/x/测试.mkv", "D:\\a b\\c.m4a"]) assert.ok(tu.isMediaFile(f), f);
+  for (const f of ["C:\\a.exe", "x.txt", "noext", "", null, 5, "a.mp4\0.exe"]) assert.ok(!tu.isMediaFile(f), String(f));
+});
+test("safeFolderName: bỏ ký tự cấm, tên thiết bị, dấu chấm cuối", () => {
+  assert.strictEqual(tu.safeFolderName('a<b>:c"/d\\e|f?g*h'), "a b c d e f g h");
+  assert.strictEqual(tu.safeFolderName("电影解说 第1集."), "电影解说 第1集");
+  assert.strictEqual(tu.safeFolderName("CON"), "video"); assert.strictEqual(tu.safeFolderName("..."), "video");
+  assert.strictEqual(tu.safeFolderName("x".repeat(200)).length, 80);
+});
+test("parse tiến độ ffmpeg / whisper", () => {
+  assert.strictEqual(tu.parseFfmpegDuration("  Duration: 00:01:23.50, start"), 83.5);
+  assert.strictEqual(tu.parseFfmpegTime("size=1kB time=00:00:05.00 bitrate\rsize=2kB time=00:00:12.50 x"), 12.5);
+  assert.strictEqual(tu.parseWhisperProgress("progress =   5%\nprogress =  45%\n"), 45);
+  assert.strictEqual(tu.parseWhisperProgress("progress = 601%"), 100);
+  assert.strictEqual(tu.parseWhisperProgress("nope"), null);
+});
+test("SRT: parse → clean → format (lọc nhiễu, ảo giác, vòng lặp ≥3)", () => {
+  const src = "\uFEFF1\r\n00:00:00,000 --> 00:00:02,000\r\n你好\r\n\r\n2\r\n00:00:02.000 --> 00:00:03.500\r\n[BLANK_AUDIO]\r\n\r\n" +
+    "3\r\n00:00:03,500 --> 00:00:05,000\r\n字幕由Amara.org社区提供\r\n\r\n" + [6,7,8,9].map(i => `${i}\n00:00:0${i},000 --> 00:00:0${i},900\n好的。\n`).join("\n");
+  const cues = tu.parseSrt(src);
+  assert.strictEqual(cues.length, 7); assert.strictEqual(cues[1].start, "00:00:02,000");
+  const { cues: out, dropped } = tu.cleanCues(cues);
+  assert.deepStrictEqual(out.map(c => c.text), ["你好", "好的。", "好的。"]); assert.strictEqual(dropped, 4);
+  assert.ok(tu.formatSrt(out).startsWith("1\n00:00:00,000 --> 00:00:02,000\n你好\n\n2\n"));
+  assert.strictEqual(tu.parseSrt(tu.formatSrt(out)).length, 3);
+  assert.deepStrictEqual(tu.cleanCues([{ start: "00:00:00,000", end: "00:00:01,000", text: "  ♪ ♪ " }]).cues, []);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
 })();
