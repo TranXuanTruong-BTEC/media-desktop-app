@@ -237,6 +237,167 @@ test("isSafeUserAgent: nhận UA Chrome, từ chối rỗng / xuống dòng / qu
   for (const v of ["", "short", "Mozilla/5.0\nX-Evil: 1 aaaaaaaa", "a".repeat(301), "Mozilla/5.0 (Windows) tiếng Việt", null, 5]) assert.ok(!ck.isSafeUserAgent(v), String(v).slice(0, 20));
 });
 
+console.log("douyin (phân tích dữ liệu / chọn bản / tên file / link an toàn)");
+const dy = require("../dist-electron/main/core/douyin.js");
+const dd = require("../dist-electron/main/core/douyin-download.js");
+const http = require("http");
+
+// Dạng phản hồi API aweme/v1/web/aweme/detail (snake_case) — theo cấu trúc yt-dlp đọc
+const apiResp = { aweme_detail: {
+  aweme_id: "7699825880927022265", desc: "Clip: vui/lắm?", author: { nickname: "Tác giả" },
+  video: {
+    width: 1080, height: 1920,
+    play_addr: { url_list: ["https://aweme.snssdk.com/aweme/v1/play/?video_id=x", "//v3.douyinvod.com/a/video.mp4?x=1"], width: 720, height: 1280, url_key: "v0_h264_720p" },
+    download_addr: { url_list: ["https://wm.example.com/wm.mp4"], width: 720 },
+    has_watermark: true,
+    bit_rate: [
+      { gear_name: "h264_1080", bit_rate: 2500000, is_bytevc1: 0, play_addr: { url_list: ["https://v26.douyinvod.com/h264_1080.mp4"], width: 1080, height: 1920 } },
+      { gear_name: "h265_1080", bit_rate: 1800000, is_bytevc1: 1, play_addr: { url_list: ["https://v26.douyinvod.com/h265_1080.mp4"], width: 1080, height: 1920 } },
+      { gear_name: "h264_540",  bit_rate: 900000,  is_bytevc1: 0, play_addr: { url_list: ["https://v26.douyinvod.com/h264_540.mp4"],  width: 540,  height: 960 } },
+      { gear_name: "vvc",       bit_rate: 700000,  is_bytevc1: 0, play_addr: { url_list: ["https://v26.douyinvod.com/vvc.mp4"], url_key: "x_bytevc2_540p", width: 540, height: 960 } },
+    ],
+  },
+} };
+test("parseAwemeDetail (API): id, tiêu đề, tác giả, bỏ bản bytevc2, link CDN trước link API", () => {
+  const m = dy.parseAwemeDetail(apiResp, "7699825880927022265");
+  assert.strictEqual(m.id, "7699825880927022265"); assert.strictEqual(m.author, "Tác giả"); assert.strictEqual(m.isImagePost, false);
+  assert.ok(!m.candidates.some(c => c.urls[0].includes("vvc.mp4")));
+  const pa = m.candidates[0];
+  assert.strictEqual(pa.urls[0], "https://v3.douyinvod.com/a/video.mp4?x=1");        // "//" → https, CDN trước
+  assert.ok(pa.urls[1].includes("/aweme/v1/play/"));
+  assert.ok(!m.candidates.some(c => c.urls[0].includes("wm.example.com")));           // watermark bị bỏ khi còn bản khác
+});
+test("parseAwemeDetail: sai ID mong muốn → null; thiếu video → null; rác → null", () => {
+  assert.strictEqual(dy.parseAwemeDetail(apiResp, "1234567890123"), null);
+  assert.strictEqual(dy.parseAwemeDetail({ aweme_detail: { aweme_id: "7699825880927022265" } }), null);
+  for (const v of [null, 5, "x", [], {}]) assert.strictEqual(dy.parseAwemeDetail(v), null);
+});
+test("parseAwemeDetail (RENDER_DATA kiểu camelCase, lồng sâu): tìm đúng video theo ID", () => {
+  const rd = { app: { x: 1 }, "abc": { aweme: { detail: {
+    awemeId: "7699825880927022265", desc: "x", authorInfo: { nickname: "N" },
+    video: { width: 720, height: 1280, playAddr: [{ src: "//p.douyinvod.com/v.mp4" }], bitRateList: [
+      { bitRate: 1000, isBytevc1: 0, width: 720, height: 1280, playAddr: [{ src: "https://p.douyinvod.com/r1.mp4" }] } ] } } },
+    other: { awemeId: "999999999999", video: { playAddr: [{ src: "https://o.com/o.mp4" }] } } } };
+  const m = dy.parseAwemeDetail(rd, "7699825880927022265");
+  assert.strictEqual(m.id, "7699825880927022265"); assert.strictEqual(m.author, "N");
+  assert.deepStrictEqual(m.candidates.map(c => c.urls[0]), ["https://p.douyinvod.com/v.mp4", "https://p.douyinvod.com/r1.mp4"]);
+});
+test("parseAwemeDetail: bài ảnh → isImagePost, không có candidate", () => {
+  const m = dy.parseAwemeDetail({ aweme_detail: { aweme_id: "7699825880927022265", images: [{}], video: { play_addr: { url_list: [] } } } });
+  assert.ok(m.isImagePost); assert.strictEqual(m.candidates.length, 0);
+});
+test("pickCandidate: tốt nhất ưu tiên độ phân giải rồi H.264; giới hạn 720p/360p; âm thanh lấy bản nhỏ nhất", () => {
+  const c = dy.parseAwemeDetail(apiResp).candidates;
+  assert.ok(dy.pickCandidate(c, "best").urls[0].endsWith("h264_1080.mp4"));
+  assert.ok(dy.pickCandidate(c, "bestvideo+bestaudio").urls[0].endsWith("h264_1080.mp4"));
+  assert.ok(dy.pickCandidate(c, "1080p").urls[0].endsWith("h264_1080.mp4"));
+  assert.ok(dy.pickCandidate(c, "720p").urls[0].includes("video.mp4"));               // 720x1280 → cạnh ngắn 720
+  assert.ok(dy.pickCandidate(c, "360p").urls[0].endsWith("h264_540.mp4"));            // không bản nào ≤360 → nhỏ nhất
+  assert.ok(dy.pickCandidate(c, "audio_mp3").urls[0].endsWith("h264_540.mp4"));
+  assert.strictEqual(dy.pickCandidate([], "best"), null);
+});
+test("safeFilename: bỏ ký tự cấm, cắt theo ký tự Unicode, tên thiết bị, rỗng → fallback", () => {
+  assert.strictEqual(dy.safeFilename('Clip: vui/lắm?\n*', "fb"), "Clip vui lắm");
+  assert.strictEqual(dy.safeFilename("   ...  ", "fb"), "fb");
+  assert.strictEqual(dy.safeFilename("CON", "fb"), "_CON");
+  assert.strictEqual(Array.from(dy.safeFilename("😀".repeat(300), "fb")).length, 100);
+  assert.ok(!/[<>:"/\\|?*\u0000-\u001f]/.test(dy.safeFilename('a<b>c:"d"/e\\f|g?h*i\u0001', "fb")));
+});
+test("isSafeMediaUrl: chỉ http(s) tới host công cộng", () => {
+  for (const u of ["https://v3.douyinvod.com/a.mp4", "http://cdn.example.com/x"]) assert.ok(dy.isSafeMediaUrl(u), u);
+  for (const u of ["file:///etc/passwd", "ftp://a.com/x", "http://localhost/x", "http://127.0.0.1/x", "http://10.0.0.5/x", "http://192.168.1.1/x",
+    "http://172.20.0.1/x", "http://169.254.169.254/latest", "http://[::1]/x", "http://user:pw@a.com/x", "http://a.local/x", "không phải url"])
+    assert.ok(!dy.isSafeMediaUrl(u), u);
+});
+test("isDouyinUrl / extractAwemeId", () => {
+  for (const u of ["https://www.douyin.com/video/7699825880927022265", "https://v.douyin.com/AbC123/", "https://www.iesdouyin.com/share/video/1"]) assert.ok(dy.isDouyinUrl(u), u);
+  for (const u of ["https://evildouyin.com/x", "https://douyin.com.evil.io/", "https://www.tiktok.com/@a/video/1", "xx"]) assert.ok(!dy.isDouyinUrl(u), u);
+  assert.strictEqual(dy.extractAwemeId("https://www.douyin.com/video/7699825880927022265?x=1"), "7699825880927022265");
+  assert.strictEqual(dy.extractAwemeId("https://v.douyin.com/AbC123/"), null);
+});
+
+console.log("douyin-download (chạy thật với server cục bộ)");
+const BODY = Buffer.alloc(300_000, 7);
+const srv = http.createServer((req, res) => {
+  const seen = (srv.seen ||= []); seen.push({ url: req.url, referer: req.headers.referer, ua: req.headers["user-agent"] });
+  if (req.url === "/video.mp4") { res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": BODY.length }); res.end(BODY); }
+  else if (req.url === "/redir") { res.writeHead(302, { Location: "/video.mp4" }); res.end(); }
+  else if (req.url === "/loop") { res.writeHead(302, { Location: "/loop" }); res.end(); }
+  else if (req.url === "/html") { res.writeHead(200, { "Content-Type": "text/html" }); res.end("<html>expired</html>"); }
+  else if (req.url === "/403") { res.writeHead(403); res.end(); }
+  else if (req.url === "/short") { res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": 1000 }); res.write(Buffer.alloc(100)); setTimeout(() => res.destroy(), 30); }
+  else if (req.url === "/slow") { res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": BODY.length }); res.write(BODY.subarray(0, 1000)); }
+  else { res.writeHead(404); res.end(); }
+});
+await new Promise(r => srv.listen(0, "127.0.0.1", r));
+const srvBase = `http://127.0.0.1:${srv.address().port}`;
+const tmpd = fs.mkdtempSync(path.join(os.tmpdir(), "dy-test-"));
+const dl = (u, name, signal) => dd.downloadToFile(srvBase + u, path.join(tmpd, name), { headers: { Referer: "https://www.douyin.com/", "User-Agent": "UA-TEST" }, signal: signal || new AbortController().signal, onProgress() {}, allowPrivate: true });
+
+await atest("downloadToFile: tải đủ file, gửi Referer + User-Agent, theo chuyển hướng", async () => {
+  await dl("/redir", "ok.bin");
+  assert.strictEqual(fs.statSync(path.join(tmpd, "ok.bin")).size, BODY.length);
+  const last = srv.seen[srv.seen.length - 1];
+  assert.strictEqual(last.referer, "https://www.douyin.com/"); assert.strictEqual(last.ua, "UA-TEST");
+});
+await atest("downloadToFile: từ chối HTML, HTTP 403, 404, vòng lặp chuyển hướng, file bị cắt — và không để lại file dở", async () => {
+  for (const [u, re] of [["/html", /không trả về video/], ["/403", /HTTP 403/], ["/nope", /HTTP 404/], ["/loop", /chuyển hướng/], ["/short", /ngắt|đủ dung lượng/]]) {
+    await assert.rejects(() => dl(u, "bad.bin"), re, u);
+    assert.ok(!fs.existsSync(path.join(tmpd, "bad.bin")), "không để lại file dở: " + u);
+  }
+});
+await atest("downloadToFile: chặn link nội bộ khi không bật allowPrivate", async () => {
+  await assert.rejects(() => dd.downloadToFile(srvBase + "/video.mp4", path.join(tmpd, "x.bin"), { headers: {}, signal: new AbortController().signal, onProgress() {} }), /không hợp lệ/);
+});
+await atest("downloadToFile: huỷ giữa chừng → reject 'cancelled' và xoá file dở", async () => {
+  const ac = new AbortController();
+  const p = dl("/slow", "cancel.bin", ac.signal);
+  setTimeout(() => ac.abort(), 150);
+  await assert.rejects(() => p, /cancelled/);
+  assert.ok(!fs.existsSync(path.join(tmpd, "cancel.bin")));
+});
+
+const mkReq = (quality) => ({ id: "abcd1234", url: "https://www.douyin.com/video/7699825880927022265", quality, outputDir: tmpd });
+const collect = (h) => new Promise(resolve => { const ev = { progress: [] }; h.emitter.on("progress", p => ev.progress.push(p)); h.emitter.on("complete", c => resolve({ ...ev, complete: c })); h.emitter.on("error", e => resolve({ ...ev, error: e })); });
+const fakeMedia = (urls, extra = {}) => ({ id: "7699825880927022265", title: "Clip: vui/lắm?", author: "A", isImagePost: false, candidates: [{ urls, width: 720, height: 1280, bitrate: 1, hevc: false }], ...extra });
+
+await atest("startDouyinDownload: luồng đầy đủ → file .mp4 đúng tên, đủ dung lượng, có progress, link đầu hỏng thì thử link sau", async () => {
+  const h = dd.startDouyinDownload(mkReq("best"), { extract: () => ({ promise: Promise.resolve(fakeMedia([srvBase + "/403", srvBase + "/video.mp4"])), cancel() {} }), ffmpeg: () => null, allowPrivate: true });
+  const r = await collect(h);
+  assert.ok(r.complete, JSON.stringify(r.error));
+  assert.strictEqual(r.complete.filename, "Clip vui lắm.mp4");
+  assert.strictEqual(fs.statSync(r.complete.filepath).size, BODY.length);
+  assert.ok(!fs.existsSync(r.complete.filepath + ".part"));
+  assert.ok(r.progress.length >= 2 && r.progress[0].percent === 0 && /Douyin/.test(r.progress[0].filename));
+  assert.ok(r.progress.some(p => p.percent === 100));
+  const h2 = dd.startDouyinDownload(mkReq("best"), { extract: () => ({ promise: Promise.resolve(fakeMedia([srvBase + "/video.mp4"])), cancel() {} }), ffmpeg: () => null, allowPrivate: true });
+  assert.strictEqual((await collect(h2)).complete.filename, "Clip vui lắm (1).mp4");   // không ghi đè file cũ
+});
+await atest("startDouyinDownload: lỗi thân thiện — bài ảnh, không có link, hết hạn, thiếu ffmpeg cho âm thanh", async () => {
+  const run = (media, q = "best") => collect(dd.startDouyinDownload(mkReq(q), { extract: () => ({ promise: Promise.resolve(media), cancel() {} }), ffmpeg: () => null, allowPrivate: true }));
+  assert.match((await run(fakeMedia([], { candidates: [], isImagePost: true }))).error.message, /bài đăng dạng ảnh/);
+  assert.match((await run(fakeMedia([], { candidates: [] }))).error.message, /không trả về link video/);
+  assert.match((await run(fakeMedia([srvBase + "/html"]))).error.message, /Không tải được video Douyin.*không trả về video/);
+  assert.match((await run(fakeMedia([srvBase + "/video.mp4"]), "audio_mp3")).error.message, /ffmpeg/);
+  assert.deepStrictEqual(fs.readdirSync(tmpd).filter(f => f.endsWith(".part")), []);
+});
+await atest("startDouyinDownload: lỗi từ bước trích xuất được chuyển nguyên văn cho người dùng", async () => {
+  const { UserFacingError } = dy;
+  const r = await collect(dd.startDouyinDownload(mkReq("best"), { extract: () => ({ promise: Promise.reject(new UserFacingError("Cần đăng nhập Douyin")), cancel() {} }), ffmpeg: () => null }));
+  assert.strictEqual(r.error.message, "Cần đăng nhập Douyin");
+});
+await atest("startDouyinDownload: huỷ → không phát complete/error, gọi cancel của bước trích xuất, không để rác", async () => {
+  let extractCancelled = false, events = 0;
+  const h = dd.startDouyinDownload(mkReq("best"), { extract: () => ({ promise: new Promise(() => {}), cancel() { extractCancelled = true; } }), ffmpeg: () => null });
+  h.emitter.on("complete", () => events++); h.emitter.on("error", () => events++);
+  await new Promise(r => setTimeout(r, 50));
+  h.cancel();
+  await new Promise(r => setTimeout(r, 100));
+  assert.ok(extractCancelled); assert.strictEqual(events, 0);
+});
+srv.close();
+fs.rmSync(tmpd, { recursive: true, force: true });
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
 })();

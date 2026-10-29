@@ -1,4 +1,3 @@
-// src/renderer/src/hooks/useUpdater.ts
 import { useEffect, useState, useCallback } from "react";
 
 export type UpdatePhase =
@@ -15,7 +14,7 @@ export interface UpdaterState {
   phase: UpdatePhase;
   version?: string;
   releaseNotes?: string;
-  percent?: number;       // 0-100 while downloading
+  percent?: number;
   errorMsg?: string;
 }
 

@@ -5,7 +5,7 @@ import { BrowserWindow, session } from "electron";
 import { COOKIE_SITES, CookieSiteKey, BrowserCookie, isLoggedIn } from "./cookies.js";
 import { logger } from "./logger.js";
 
-const PARTITION = "persist:cookie-login";
+export const PARTITION = "persist:cookie-login";
 const POLL_MS = 1500;
 const SETTLE_MS = 4000;                 // sau khi thấy đăng nhập, chờ trang sinh cookie "tươi" rồi mới lấy
 const MAX_WAIT_MS = 10 * 60 * 1000;     // tối đa 10 phút
@@ -22,6 +22,19 @@ export function chromeUserAgent(): string {
   return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
 }
 
+/**
+ * Cấu hình phiên dùng chung cho cửa sổ đăng nhập và cửa sổ trích xuất video: UA Chrome sạch,
+ * từ chối mọi quyền (camera, vị trí...), và chặn tải media (video/audio) để không tốn băng thông.
+ */
+export function configureLoginSession(ses: Electron.Session, ua: string): void {
+  ses.setUserAgent(ua);
+  ses.setPermissionRequestHandler((_wc, _p, cb) => cb(false));
+  ses.setPermissionCheckHandler(() => false);
+  ses.webRequest.onBeforeRequest({ urls: ["https://*/*", "http://*/*"] }, (details, cb) => {
+    cb({ cancel: details.resourceType === "media" });
+  });
+}
+
 let loginOpen = false;
 
 function isHttps(u: string): boolean {
@@ -35,9 +48,7 @@ export function runCookieLogin(parent: BrowserWindow, siteKey: CookieSiteKey): P
   const site = COOKIE_SITES[siteKey];
   const ua = chromeUserAgent();
   const ses = session.fromPartition(PARTITION);
-  ses.setUserAgent(ua);
-  ses.setPermissionRequestHandler((_wc, _p, cb) => cb(false));
-  ses.setPermissionCheckHandler(() => false);
+  configureLoginSession(ses, ua);
 
   const win = new BrowserWindow({
     parent,

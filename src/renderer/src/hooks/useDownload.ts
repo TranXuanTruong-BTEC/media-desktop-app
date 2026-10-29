@@ -1,4 +1,3 @@
-// src/renderer/src/hooks/useDownload.ts
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   DownloadRequest,
@@ -16,7 +15,6 @@ export interface RetryInfo {
   maxAttempts: number;
   reason:      string;
   delayMs:     number;
-  /** Timestamp khi bắt đầu chờ — dùng để đếm ngược countdown */
   startedAt:   number;
 }
 
@@ -35,22 +33,17 @@ export interface DownloadItem {
   warning?:  string;
   addedAt:   number;
   retryInfo?: RetryInfo;
-  /** Đường dẫn file cuối cùng (có khi đã xong) */
   filepath?: string;
-  /** Khi tải nhiều luồng: "1/2", "2/2" */
   stage?:    string;
 }
 
-// Số tải chạy cùng lúc tối đa — các link còn lại xếp hàng (trạng thái "queued")
 const MAX_CONCURRENT = 3;
 
-/** ID ngẫu nhiên mật mã học (24 ký tự hex). Math.random() dễ trùng và đoán được. */
 function uid() {
   const b = crypto.getRandomValues(new Uint8Array(12));
   return Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
 }
 
-// ── Lịch sử tải (lưu bền vững, độc lập với hàng đợi) ─────────────────────────
 const HISTORY_KEY = "mediaget.history.v1";
 const HISTORY_MAX = 1000;
 
@@ -68,8 +61,6 @@ function saveHistory(list: DownloadItem[]) {
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX))); }
   catch { /* ignore quota / private mode */ }
 }
-
-/** Chuẩn hoá URL để so sánh trùng (YouTube watch?v= / youtu.be / shorts → cùng 1 khoá) */
 export function normalizeUrl(raw: string): string {
   const url = raw.trim();
   try {
@@ -97,7 +88,6 @@ export function useDownload(defaultOutputDir: string) {
   itemsRef.current = items;
   const startedRef = useRef<Set<string>>(new Set());
 
-  // Bộ lập lịch: mỗi khi danh sách đổi, nếu còn chỗ trống thì bắt đầu các mục đang chờ.
   useEffect(() => {
     if (!window.api) return;
     const running = items.filter(i => i.status === "downloading" || i.status === "retrying").length;
@@ -120,8 +110,6 @@ export function useDownload(defaultOutputDir: string) {
     ));
   }, [items]);
 
-  // Mỗi khi 1 mục kết thúc (xong/lỗi/huỷ) → ghi vào lịch sử (upsert theo id).
-  // Xoá mục khỏi hàng đợi KHÔNG ảnh hưởng lịch sử.
   useEffect(() => {
     const finished = items.filter(i => TERMINAL.includes(i.status));
     if (finished.length === 0) return;
@@ -146,7 +134,6 @@ export function useDownload(defaultOutputDir: string) {
 
     const offProgress = window.api.onProgress((p: DownloadProgress) =>
       setItems(prev => prev.map(item =>
-        // Bỏ qua progress đến muộn của mục đã xong/lỗi/huỷ (tránh "sống lại" sau khi bấm Huỷ)
         item.id === p.id && !TERMINAL.includes(item.status)
           ? {
               ...item,
@@ -211,7 +198,6 @@ export function useDownload(defaultOutputDir: string) {
   const addDownload = useCallback((url: string, quality: VideoQuality, outputDir: string) => {
     if (!window.api) return;
     const id = uid();
-    // Luôn vào hàng đợi; bộ lập lịch ở trên sẽ chạy ngay nếu còn chỗ trống.
     setItems(prev => [...prev, {
       id, url, quality, outputDir,
       status: "queued",
@@ -228,7 +214,6 @@ export function useDownload(defaultOutputDir: string) {
     ));
   }, []);
 
-  /** Tải lại 1 mục lỗi/đã huỷ: thay thế mục cũ (ở cả hàng đợi và lịch sử) bằng 1 lượt tải mới. */
   const retryDownload = useCallback((id: string) => {
     const src = itemsRef.current.find(i => i.id === id) ?? historyRef.current.find(h => h.id === id);
     if (!src) return;
@@ -255,11 +240,6 @@ export function useDownload(defaultOutputDir: string) {
     setHistory([]); saveHistory([]);
   }, []);
 
-  /**
-   * Tìm link trùng:
-   *  - "active": cùng link đang tải / đang chờ / đang thử lại
-   *  - "done"  : cùng link đã tải THÀNH CÔNG trước đó (trong hàng đợi hoặc lịch sử)
-   */
   const findDuplicate = useCallback((url: string):
     { item: DownloadItem; state: "active" | "done" } | undefined => {
     const key = normalizeUrl(url);

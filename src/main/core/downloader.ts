@@ -21,6 +21,10 @@ import {
 } from "../../shared/ipc-types.js";
 import { logger } from "./logger.js";
 import { isCookieBrowser, usesBrowserCookies, isSafeUserAgent } from "./cookies.js";
+import { isDouyinUrl } from "./douyin.js";
+import { startDouyinDownload } from "./douyin-download.js";
+import { extractDouyinMedia } from "./douyin-extract.js";
+import { chromeUserAgent } from "./cookie-login.js";
 import {
   isValidDownloadUrl, VALID_QUALITIES, escapeOutputTemplate, appendCapped, redactUrl,
 } from "./security.js";
@@ -594,15 +598,6 @@ export function startDownload(req: DownloadRequest): {
     return { emitter, cancel: () => {} };
   }
 
-  const ytDlp = getYtDlpPath();
-  if (!fs.existsSync(ytDlp)) {
-    logger.error("downloader", "Thiếu yt-dlp.exe", { ytDlp });
-    setImmediate(() =>
-      emitter.emit("error", { id: req.id, message: `Không tìm thấy yt-dlp.exe tại:\n${ytDlp}` })
-    );
-    return { emitter, cancel: () => {} };
-  }
-
   try {
     fs.mkdirSync(req.outputDir, { recursive: true });
     fs.accessSync(req.outputDir, fs.constants.W_OK);
@@ -610,6 +605,27 @@ export function startDownload(req: DownloadRequest): {
     const message = `Không thể ghi vào thư mục đã chọn:\n${req.outputDir}`;
     logger.error("downloader", message, err);
     setImmediate(() => emitter.emit("error", { id: req.id, message }));
+    return { emitter, cancel: () => {} };
+  }
+
+  // Douyin: yt-dlp gọi API không có chữ ký nên bị từ chối ("Fresh cookies..."). Thay vào đó dùng cửa sổ
+  // trình duyệt của app (tự ký request) để lấy link video rồi tải trực tiếp.
+  if (isDouyinUrl(req.url)) {
+    logger.info("downloader", "Tải Douyin qua cửa sổ trình duyệt", { url: redactUrl(req.url) });
+    return startDouyinDownload(req, {
+      extract: extractDouyinMedia,
+      ffmpeg: findFfmpeg,
+      userAgent: chromeUserAgent(),
+      log: (message, extra) => logger.info("douyin", message, extra),
+    });
+  }
+
+  const ytDlp = getYtDlpPath();
+  if (!fs.existsSync(ytDlp)) {
+    logger.error("downloader", "Thiếu yt-dlp.exe", { ytDlp });
+    setImmediate(() =>
+      emitter.emit("error", { id: req.id, message: `Không tìm thấy yt-dlp.exe tại:\n${ytDlp}` })
+    );
     return { emitter, cancel: () => {} };
   }
 

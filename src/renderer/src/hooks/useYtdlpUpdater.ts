@@ -1,4 +1,3 @@
-// src/renderer/src/hooks/useYtdlpUpdater.ts
 import { useEffect, useState, useCallback } from "react";
 
 export type YtdlpPhase =
