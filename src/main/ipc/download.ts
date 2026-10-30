@@ -14,7 +14,7 @@ const activeCancels  = new Map<string, CancelFn>();
 const activeProgress = new Map<string, number>();
 
 /** Thư mục người dùng đã chọn qua hộp thoại trong phiên này (cho phép cả đường dẫn UNC). */
-export const dialogDirs = new Set<string>();
+const dialogDirs = new Set<string>();
 
 /** Giới hạn số tiến trình yt-dlp chạy đồng thời ở phía main (renderer chỉ chạy tối đa 3). */
 const MAX_ACTIVE_DOWNLOADS = 8;

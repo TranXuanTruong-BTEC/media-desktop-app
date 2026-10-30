@@ -28,33 +28,6 @@
 1. Vào trang [**Releases**](https://github.com/TranXuanTruong-BTEC/media-desktop-app/releases/latest)
 2. Tải file `MediaGet-Setup.exe`
 3. Chạy installer và làm theo hướng dẫn
-
-### Build từ source
-
-**Yêu cầu:** Node.js 20+, npm
-
-```bash
-# Clone repo
-git clone https://github.com/TranXuanTruong-BTEC/media-desktop-app.git
-cd media-desktop-app
-
-# Cài dependencies
-npm install
-
-# Tải yt-dlp.exe vào thư mục tools/
-mkdir tools
-# Windows (PowerShell):
-Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "tools/yt-dlp.exe"
-
-# Chạy dev mode
-npm run dev
-
-# Build installer
-npm run dist
-```
-
----
-
 ## Sử dụng
 
 1. Dán link video vào ô nhập liệu
@@ -73,62 +46,6 @@ Khi có phiên bản mới, app sẽ **tự động kiểm tra** lúc khởi đ�
 - **"Cập nhật ngay"** — tải bản mới ngầm, không gián đoạn việc tải
 - **"Để sau"** — bỏ qua, nhắc lại lần sau
 - Sau khi tải xong → bấm **"Cài & khởi động lại"** để áp dụng
-
----
-
-## Phát hành phiên bản mới
-
-```bash
-# 1. Tăng version trong package.json
-#    "version": "2.1.0"
-
-# 2. Commit + tag + push
-git add .
-git commit -m "release: v2.1.0"
-git tag v2.1.0
-git push origin main --tags
-```
-
-GitHub Actions sẽ tự động build và upload `MediaGet-Setup.exe` + `latest.yml` lên Releases (~5–10 phút).
-
-> **Lưu ý:** Cần có secret `GH_TOKEN` trong repository Settings → Secrets → Actions.
-
----
-
-## Cấu trúc dự án
-
-```
-media-desktop-app/
-├── src/
-│   ├── main/                  
-│   │   ├── main.ts            
-│   │   ├── preload.ts         
-│   │   └── ipc/
-│   │       ├── download.ts    
-│   │       └── updater.ts     
-│   ├── renderer/              
-│   │   └── src/
-│   │       ├── App.tsx
-│   │       ├── components/
-│   │       │   ├── Titlebar.tsx
-│   │       │   ├── DownloadForm.tsx
-│   │       │   ├── DownloadItem.tsx
-│   │       │   ├── StatusBar.tsx
-│   │       │   ├── UpdateDialog.tsx 
-│   │       │   └── NoNodeWarning.tsx
-│   │       └── hooks/
-│   │           ├── useDownload.ts
-│   │           └── useUpdater.ts  
-│   └── shared/
-│       └── ipc-types.ts       
-├── tools/                    
-├── build/                     
-├── .github/workflows/
-│   └── build.yml             
-├── package.json
-└── vite.config.ts
-```
-
 ---
 
 ## Công nghệ sử dụng
@@ -143,16 +60,6 @@ media-desktop-app/
 | Auto-updater | electron-updater |
 | CI/CD | GitHub Actions |
 | Installer | NSIS (electron-builder) |
-
----
-
-## Yêu cầu hệ thống
-
-- **OS:** Windows 10 / 11 (64-bit)
-- **RAM:** 150 MB trở lên
-- **Dung lượng:** ~120 MB (đã bao gồm runtime)
-- Không cần cài Node.js hay Python
-
 ---
 
 ## Đóng góp

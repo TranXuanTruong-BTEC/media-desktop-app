@@ -1,103 +1,119 @@
+// src/renderer/src/hooks/useTranscribe.ts
+// Trạng thái của tính năng "Trích xuất văn bản". Đặt ở App để vẫn giữ nguyên khi người dùng chuyển sang tab khác.
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TranscribeInfo, TranscribeResult, ModelId, ModelProgress } from "../electron.d";
+import type {
+  PickedFile, TranscribeProgress, TranscribeSegment, TranscribeStatus, WhisperModelId,
+} from "../../../shared/ipc-types";
 
-const MODEL_KEY = "mediaget.whisperModel";
+export type TranscribePhase = "idle" | "running" | "done" | "error";
 
-export type Job =
-  | { status: "idle" }
-  | { status: "running"; id: string; stage: "extract" | "transcribe" | "finalize"; percent: number; text?: string }
-  | { status: "done"; result: TranscribeResult }
-  | { status: "error"; message: string };
-
-export interface PickedFile { path: string; name: string; }
+export interface TranscribeState {
+  file: PickedFile | null;
+  model: WhisperModelId;
+  status: TranscribeStatus | null;
+  phase: TranscribePhase;
+  progress: TranscribeProgress | null;
+  segments: TranscribeSegment[];
+  error: string | null;
+  notice: string | null;      // thông báo nhỏ (đã lưu / đã sao chép...)
+  noticeIsError: boolean;
+}
 
 function uid() {
   const b = crypto.getRandomValues(new Uint8Array(12));
   return Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
 }
-const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
-
-function loadModel(): ModelId {
-  try { const v = localStorage.getItem(MODEL_KEY); if (v === "small" || v === "turbo" || v === "large") return v; } catch { /* ignore */ }
-  return "turbo";
-}
 
 export function useTranscribe() {
-  const [info, setInfo]       = useState<TranscribeInfo | null>(null);
-  const [file, setFile]       = useState<PickedFile | null>(null);
-  const [modelId, setModelId] = useState<ModelId>(loadModel);
-  const [dl, setDl]           = useState<ModelProgress | null>(null);
-  const [dlMsg, setDlMsg]     = useState<{ ok: boolean; text: string } | null>(null);
-  const [job, setJob]         = useState<Job>({ status: "idle" });
+  const [state, setState] = useState<TranscribeState>({
+    file: null, model: "small", status: null, phase: "idle", progress: null,
+    segments: [], error: null, notice: null, noticeIsError: false,
+  });
   const jobId = useRef<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const refresh = useCallback(async () => {
-    try { setInfo(await window.api.transcribeInfo()); } catch { /* ignore */ }
+  const patch = useCallback((p: Partial<TranscribeState>) => setState(s => ({ ...s, ...p })), []);
+
+  const showNotice = useCallback((text: string, isError = false) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setState(s => ({ ...s, notice: text, noticeIsError: isError }));
+    noticeTimer.current = setTimeout(() => setState(s => ({ ...s, notice: null })), 5000);
+  }, []);
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      const status = await window.api.getTranscribeStatus();
+      if (status) setState(s => ({ ...s, status }));
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
-    void refresh();
-    const offJob = window.api.onTranscribeProgress((p) => {
-      if (p.id !== jobId.current) return;
-      setJob(prev => prev.status === "running"
-        ? { ...prev, stage: p.stage, percent: p.percent >= 0 && p.percent > 0 ? p.percent : prev.percent, text: p.text ?? prev.text }
-        : prev);
+    void refreshStatus();
+    const offP = window.api.onTranscribeProgress(p => {
+      if (p.id === jobId.current) setState(s => ({ ...s, progress: p }));
     });
-    const offModel = window.api.onModelProgress((p) => setDl(p));
-    return () => { offJob(); offModel(); };
-  }, [refresh]);
-
-  const selectModel = useCallback((id: ModelId) => {
-    setModelId(id);
-    try { localStorage.setItem(MODEL_KEY, id); } catch { /* ignore */ }
-  }, []);
+    const offD = window.api.onTranscribeDone(d => {
+      if (d.id !== jobId.current) return;
+      setState(s => ({ ...s, phase: "done", segments: d.segments, progress: null, error: null }));
+      void refreshStatus();
+    });
+    const offE = window.api.onTranscribeError(e => {
+      if (e.id !== jobId.current) return;
+      setState(s => ({ ...s, phase: "error", error: e.message, progress: null }));
+      void refreshStatus();
+    });
+    return () => { offP(); offD(); offE(); if (noticeTimer.current) clearTimeout(noticeTimer.current); };
+  }, [refreshStatus]);
 
   const pickFile = useCallback(async () => {
-    const p = await window.api.transcribeSelectFile();
-    if (p) { setFile({ path: p, name: baseName(p) }); setJob({ status: "idle" }); }
-  }, []);
+    if (state.phase === "running") return;
+    const r = await window.api.pickTranscribeFile();
+    if (r.canceled) return;
+    if (!r.ok || !r.file) { showNotice(r.error ?? "Không chọn được file.", true); return; }
+    jobId.current = null;
+    setState(s => ({ ...s, file: r.file!, phase: "idle", segments: [], error: null, progress: null }));
+  }, [state.phase, showNotice]);
 
-  const dropFile = useCallback((f: File) => {
-    const p = window.api.getPathForFile(f);
-    if (!p) { setJob({ status: "error", message: "Không lấy được đường dẫn file đã thả vào." }); return; }
-    setFile({ path: p, name: baseName(p) });
-    setJob({ status: "idle" });
-  }, []);
+  const setModel = useCallback((model: WhisperModelId) => patch({ model }), [patch]);
 
-  const downloadModel = useCallback(async (id: ModelId) => {
-    setDlMsg(null);
-    setDl({ id, percent: 0, receivedMB: 0, totalMB: 0 });
-    try {
-      const r = await window.api.downloadWhisperModel(id);
-      if (r) setDlMsg({ ok: r.ok, text: r.message });
-    } finally {
-      setDl(null);
-      void refresh();
-    }
-  }, [refresh]);
-
-  const cancelModelDownload = useCallback((id: ModelId) => { void window.api.cancelModelDownload(id); }, []);
-
-  const start = useCallback(async (outputDir: string) => {
-    if (!file) return;
+  const start = useCallback(async () => {
+    if (!state.file || state.phase === "running") return;
     const id = uid();
     jobId.current = id;
-    setJob({ status: "running", id, stage: "extract", percent: 0 });
-    try {
-      const r = await window.api.transcribeStart({ id, inputPath: file.path, outputDir, modelId });
-      if (jobId.current !== id) return;
-      if (!r) setJob({ status: "error", message: "Yêu cầu bị từ chối." });
-      else if (r.ok) setJob({ status: "done", result: r.result });
-      else setJob(r.cancelled ? { status: "idle" } : { status: "error", message: r.message });
-    } catch (e: any) {
-      setJob({ status: "error", message: e?.message ?? String(e) });
+    setState(s => ({
+      ...s, phase: "running", segments: [], error: null, notice: null,
+      progress: { id, stage: "tools", percent: 0, message: "Đang chuẩn bị..." },
+    }));
+    const r = await window.api.startTranscribe({ id, fileToken: state.file.token, model: state.model });
+    if (!r.ok) {
+      jobId.current = null;
+      setState(s => ({ ...s, phase: "error", error: r.error ?? "Không bắt đầu được.", progress: null }));
     }
-  }, [file, modelId]);
+  }, [state.file, state.model, state.phase]);
 
   const cancel = useCallback(() => {
-    if (jobId.current) void window.api.transcribeCancel(jobId.current);
-  }, []);
+    if (jobId.current) window.api.cancelTranscribe(jobId.current);
+    jobId.current = null;
+    setState(s => ({ ...s, phase: "idle", progress: null }));
+    void refreshStatus();
+  }, [refreshStatus]);
 
-  return { info, file, modelId, dl, dlMsg, job, selectModel, pickFile, dropFile, downloadModel, cancelModelDownload, start, cancel, refresh };
+  const saveSrt = useCallback(async () => {
+    if (!jobId.current) return;
+    const r = await window.api.saveTranscribeSrt(jobId.current);
+    if (r.canceled) return;
+    if (r.ok) showNotice("Đã lưu file phụ đề.");
+    else showNotice(r.error ?? "Không lưu được file.", true);
+  }, [showNotice]);
+
+  const copyText = useCallback(async () => {
+    if (!jobId.current) return;
+    const r = await window.api.copyTranscribeText(jobId.current);
+    if (r.ok) showNotice("Đã sao chép văn bản.");
+    else showNotice(r.error ?? "Không sao chép được.", true);
+  }, [showNotice]);
+
+  return { state, pickFile, setModel, start, cancel, saveSrt, copyText };
 }
+
 export type TranscribeApi = ReturnType<typeof useTranscribe>;

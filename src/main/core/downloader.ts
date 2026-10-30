@@ -17,8 +17,14 @@ import {
   DownloadError,
   DownloadRetrying,
   VideoQuality,
+  CookieBrowser,
 } from "../../shared/ipc-types.js";
 import { logger } from "./logger.js";
+import { isCookieBrowser, usesBrowserCookies, isSafeUserAgent } from "./cookies.js";
+import { isDouyinUrl } from "./douyin.js";
+import { startDouyinDownload } from "./douyin-download.js";
+import { extractDouyinMedia } from "./douyin-extract.js";
+import { chromeUserAgent } from "./cookie-login.js";
 import {
   isValidDownloadUrl, VALID_QUALITIES, escapeOutputTemplate, appendCapped, redactUrl,
 } from "./security.js";
@@ -94,23 +100,81 @@ function classifyError(stderr: string, stdout: string): "network" | "fatal" {
 function summarizeError(stderr: string, stdout = ""): string {
   const combined = stderr + "\n" + stdout;
   const lines = combined.split("\n").map(l => l.trim()).filter(Boolean);
+  const browserLine = lines.find(l => /cookies? (database|from)|could not find .* cookies|failed to decrypt|DPAPI|could not copy .*cookie/i.test(l));
+  if (browserLine) {
+    return "Không đọc được cookies từ trình duyệt đã chọn. Hãy đăng nhập douyin.com bằng Firefox, " +
+           "chọn Firefox ở Cài đặt → Cookies đăng nhập (Chrome/Edge bản mới thường không đọc được), rồi tải lại.\n" +
+           browserLine.slice(0, 200);
+  }
   if (lines.some(l => /fresh cookies/i.test(l))) {
-    return "Douyin yêu cầu cookie. Vào Cài đặt → \"Cookie Douyin\", nhập cookie từ trình duyệt rồi bấm tải lại (nút ⟳).";
+    return "Trang này yêu cầu cookie mới. Vào Cài đặt → Cookies đăng nhập, bấm \"Đăng nhập Douyin\" " +
+           "để app tự lấy cookies mới, rồi bấm tải lại.";
   }
   const hint = lines.find(l => /n challenge solving failed|no supported javascript runtime|requested format is not available|sign in to confirm/i.test(l));
   if (hint) return hint;
   return lines.find(l => /error|failed|unable/i.test(l)) ?? lines[lines.length - 1] ?? "Lỗi không xác định";
 }
 
-// ─── Douyin cookies ───────────────────────────────────────────────────────────
+// ─── Cookies do người dùng cung cấp ───────────────────────────────────────────
 
-/** Douyin bắt buộc có cookie mới (yt-dlp báo "Fresh cookies ... are needed"). */
+/**
+ * File cookies.txt (Netscape) người dùng dán/chọn trong Cài đặt. Một số trang (Douyin, TikTok, nội dung
+ * cần đăng nhập...) bắt buộc có cookie. yt-dlp chỉ gửi cookie khớp tên miền của link đang tải.
+ */
 export function getCookiesPath(): string {
   return path.join(app.getPath("userData"), "cookies.txt");
 }
 
-function isDouyinUrl(url: string): boolean {
-  try { return /(^|\.)douyin\.com$/i.test(new URL(url).hostname); } catch { return false; }
+function getCookieBrowserPath(): string {
+  return path.join(app.getPath("userData"), "cookie-browser.txt");
+}
+
+/** Trình duyệt người dùng chọn trong Cài đặt ("none" nếu chưa chọn / file hỏng). */
+export function getCookieBrowser(): CookieBrowser {
+  try {
+    const v = fs.readFileSync(getCookieBrowserPath(), "utf8").trim();
+    return isCookieBrowser(v) ? v : "none";
+  } catch { return "none"; }
+}
+
+export function setCookieBrowser(b: CookieBrowser): void {
+  fs.writeFileSync(getCookieBrowserPath(), b, "utf8");
+}
+
+function getCookieUserAgentPath(): string {
+  return path.join(app.getPath("userData"), "cookie-ua.txt");
+}
+
+/** UA của cửa sổ đăng nhập đã lấy cookies (cookie chữ ký của Douyin gắn với UA) — null nếu chưa có. */
+export function getCookieUserAgent(): string | null {
+  try {
+    const v = fs.readFileSync(getCookieUserAgentPath(), "utf8").trim();
+    return isSafeUserAgent(v) ? v : null;
+  } catch { return null; }
+}
+
+export function setCookieUserAgent(ua: string): void {
+  if (!isSafeUserAgent(ua)) throw new Error("invalid user agent");
+  fs.writeFileSync(getCookieUserAgentPath(), ua, "utf8");
+}
+
+export function clearCookieUserAgent(): void {
+  try { fs.rmSync(getCookieUserAgentPath(), { force: true }); } catch { /* ignore */ }
+}
+
+/**
+ * Douyin/TikTok: ưu tiên cookies từ trình duyệt đã chọn; nếu không thì dùng file cookies.txt (kèm đúng UA đã
+ * dùng khi lấy cookies). Trang khác: chỉ dùng file cookies.txt nếu có.
+ */
+function cookieArgs(url: string): string[] {
+  const special = usesBrowserCookies(url);
+  const browser = getCookieBrowser();
+  if (browser !== "none" && special) return ["--cookies-from-browser", browser];
+  if (!fs.existsSync(getCookiesPath())) return [];
+  const args = ["--cookies", getCookiesPath()];
+  const ua = special ? getCookieUserAgent() : null;
+  if (ua) args.push("--user-agent", ua);
+  return args;
 }
 
 // ─── Tool paths ───────────────────────────────────────────────────────────────
@@ -289,7 +353,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
     ...jsRuntime,
     ...(process.env["MEDIAGET_REMOTE_COMPONENTS"] === "1" ? ["--remote-components", "ejs:github"] : []),
     ...(ffmpeg ? ["--ffmpeg-location", ffmpeg] : []),
-    ...(isDouyinUrl(req.url) && fs.existsSync(getCookiesPath()) ? ["--cookies", getCookiesPath()] : []),
+    ...cookieArgs(req.url),
     "--newline",
     "-o", outputTpl,
   ];
@@ -346,7 +410,7 @@ export function buildArgs(req: DownloadRequest): BuiltArgs {
 }
 
 // ─── Single attempt
-export function killTree(proc: ChildProcess, sync = false): void {
+function killTree(proc: ChildProcess, sync = false): void {
   const pid = proc.pid;
   if (process.platform === "win32" && pid) {
     const args = ["/pid", String(pid), "/T", "/F"];
@@ -534,15 +598,6 @@ export function startDownload(req: DownloadRequest): {
     return { emitter, cancel: () => {} };
   }
 
-  const ytDlp = getYtDlpPath();
-  if (!fs.existsSync(ytDlp)) {
-    logger.error("downloader", "Thiếu yt-dlp.exe", { ytDlp });
-    setImmediate(() =>
-      emitter.emit("error", { id: req.id, message: `Không tìm thấy yt-dlp.exe tại:\n${ytDlp}` })
-    );
-    return { emitter, cancel: () => {} };
-  }
-
   try {
     fs.mkdirSync(req.outputDir, { recursive: true });
     fs.accessSync(req.outputDir, fs.constants.W_OK);
@@ -550,6 +605,27 @@ export function startDownload(req: DownloadRequest): {
     const message = `Không thể ghi vào thư mục đã chọn:\n${req.outputDir}`;
     logger.error("downloader", message, err);
     setImmediate(() => emitter.emit("error", { id: req.id, message }));
+    return { emitter, cancel: () => {} };
+  }
+
+  // Douyin: yt-dlp gọi API không có chữ ký nên bị từ chối ("Fresh cookies..."). Thay vào đó dùng cửa sổ
+  // trình duyệt của app (tự ký request) để lấy link video rồi tải trực tiếp.
+  if (isDouyinUrl(req.url)) {
+    logger.info("downloader", "Tải Douyin qua cửa sổ trình duyệt", { url: redactUrl(req.url) });
+    return startDouyinDownload(req, {
+      extract: extractDouyinMedia,
+      ffmpeg: findFfmpeg,
+      userAgent: chromeUserAgent(),
+      log: (message, extra) => logger.info("douyin", message, extra),
+    });
+  }
+
+  const ytDlp = getYtDlpPath();
+  if (!fs.existsSync(ytDlp)) {
+    logger.error("downloader", "Thiếu yt-dlp.exe", { ytDlp });
+    setImmediate(() =>
+      emitter.emit("error", { id: req.id, message: `Không tìm thấy yt-dlp.exe tại:\n${ytDlp}` })
+    );
     return { emitter, cancel: () => {} };
   }
 

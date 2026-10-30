@@ -82,20 +82,6 @@ jobs:
 
       # CI is the only publisher. electron-builder only builds (never uploads)
       # so the installer and latest.yml cannot get out of sync from two writers.
-      # whisper.cpp không còn phát hành .exe dựng sẵn → build từ mã nguồn đã ghim (tag + SHA-256),
-      # cache theo phiên bản/script để không phải build lại mỗi lần (~vài phút).
-      - name: Cache whisper-cli.exe
-        id: whisper-cache
-        uses: actions/cache@v4
-        with:
-          path: tools/whisper-cli.exe
-          key: whisper-cli-v1.9.5-${{ hashFiles('scripts/build-whisper.ps1') }}
-
-      - name: Build whisper-cli.exe (whisper.cpp v1.9.5, pinned source SHA-256)
-        if: steps.whisper-cache.outputs.cache-hit != 'true'
-        shell: powershell
-        run: ./scripts/build-whisper.ps1
-
       - name: Build installer
         run: npm run dist -- --publish never
 

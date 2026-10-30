@@ -1,5 +1,5 @@
 // src/main/preload.ts — standalone, zero cross-folder imports
-import { contextBridge, ipcRenderer, webUtils } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
   DOWNLOAD_START:    "download:start",
@@ -11,6 +11,16 @@ const IPC = {
   DOWNLOAD_ERROR:    "download:error",
   DOWNLOAD_RETRYING: "download:retrying",
   OPEN_PATH:         "app:openPath",
+  // Trích xuất văn bản
+  TRANSCRIBE_PICK:     "transcribe:pick",
+  TRANSCRIBE_STATUS:   "transcribe:status",
+  TRANSCRIBE_START:    "transcribe:start",
+  TRANSCRIBE_CANCEL:   "transcribe:cancel",
+  TRANSCRIBE_SAVE:     "transcribe:save",
+  TRANSCRIBE_COPY:     "transcribe:copy",
+  TRANSCRIBE_PROGRESS: "transcribe:progress",
+  TRANSCRIBE_DONE:     "transcribe:done",
+  TRANSCRIBE_ERROR:    "transcribe:error",
   // Auto-updater
   UPDATER_CHECK:        "updater:check",
   UPDATER_STATUS:       "updater:status",
@@ -50,6 +60,37 @@ contextBridge.exposeInMainWorld("api", {
     return () => ipcRenderer.removeListener(IPC.DOWNLOAD_RETRYING, fn);
   },
 
+  // Cookies (nội dung cookie không bao giờ trả về renderer)
+  getCookiesStatus: ()             => ipcRenderer.invoke("cookies:status"),
+  saveCookies:      (text: string) => ipcRenderer.invoke("cookies:save", text),
+  importCookies:    ()             => ipcRenderer.invoke("cookies:import"),
+  clearCookies:     ()             => ipcRenderer.invoke("cookies:clear"),
+  setCookieBrowser: (b: string)    => ipcRenderer.invoke("cookies:setBrowser", b),
+  loginCookies:     (site: string) => ipcRenderer.invoke("cookies:login", site),
+
+  // Trích xuất văn bản (nhận diện giọng nói)
+  pickTranscribeFile: ()                 => ipcRenderer.invoke(IPC.TRANSCRIBE_PICK),
+  getTranscribeStatus: ()                => ipcRenderer.invoke(IPC.TRANSCRIBE_STATUS),
+  startTranscribe:   (req: unknown)      => ipcRenderer.invoke(IPC.TRANSCRIBE_START, req),
+  cancelTranscribe:  (id: string)        => ipcRenderer.send(IPC.TRANSCRIBE_CANCEL, id),
+  saveTranscribeSrt: (id: string)        => ipcRenderer.invoke(IPC.TRANSCRIBE_SAVE, id),
+  copyTranscribeText: (id: string)       => ipcRenderer.invoke(IPC.TRANSCRIBE_COPY, id),
+  onTranscribeProgress: (cb: (p: unknown) => void) => {
+    const fn = (_: unknown, p: unknown) => cb(p);
+    ipcRenderer.on(IPC.TRANSCRIBE_PROGRESS, fn);
+    return () => ipcRenderer.removeListener(IPC.TRANSCRIBE_PROGRESS, fn);
+  },
+  onTranscribeDone: (cb: (d: unknown) => void) => {
+    const fn = (_: unknown, d: unknown) => cb(d);
+    ipcRenderer.on(IPC.TRANSCRIBE_DONE, fn);
+    return () => ipcRenderer.removeListener(IPC.TRANSCRIBE_DONE, fn);
+  },
+  onTranscribeError: (cb: (e: unknown) => void) => {
+    const fn = (_: unknown, e: unknown) => cb(e);
+    ipcRenderer.on(IPC.TRANSCRIBE_ERROR, fn);
+    return () => ipcRenderer.removeListener(IPC.TRANSCRIBE_ERROR, fn);
+  },
+
   // Window controls
   winMinimize: () => ipcRenderer.send("win:minimize"),
   winMaximize: () => ipcRenderer.send("win:maximize"),
@@ -64,31 +105,6 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on(IPC.UPDATER_STATUS, fn);
     return () => ipcRenderer.removeListener(IPC.UPDATER_STATUS, fn);
   },
-
-  // Trích xuất văn bản (tiếng Trung → transcript.srt)
-  getPathForFile:       (f: File) => { try { return webUtils.getPathForFile(f); } catch { return ""; } },
-  transcribeInfo:       ()                       => ipcRenderer.invoke("transcribe:info"),
-  transcribeSelectFile: ()                       => ipcRenderer.invoke("transcribe:selectFile"),
-  transcribeStart:      (req: unknown)           => ipcRenderer.invoke("transcribe:start", req),
-  transcribeCancel:     (id: string)             => ipcRenderer.invoke("transcribe:cancel", id),
-  downloadWhisperModel: (id: string)             => ipcRenderer.invoke("transcribe:modelDownload", id),
-  cancelModelDownload:  (id: string)             => ipcRenderer.invoke("transcribe:modelCancel", id),
-  onTranscribeProgress: (cb: (p: unknown) => void) => {
-    const fn = (_: unknown, p: unknown) => cb(p);
-    ipcRenderer.on("transcribe:progress", fn);
-    return () => ipcRenderer.removeListener("transcribe:progress", fn);
-  },
-  onModelProgress: (cb: (p: unknown) => void) => {
-    const fn = (_: unknown, p: unknown) => cb(p);
-    ipcRenderer.on("transcribe:modelProgress", fn);
-    return () => ipcRenderer.removeListener("transcribe:modelProgress", fn);
-  },
-
-  // Cookie Douyin (nhập trong Cài đặt)
-  getCookiesStatus:  ()            => ipcRenderer.invoke("cookies:status"),
-  importCookiesFile: ()            => ipcRenderer.invoke("cookies:importFile"),
-  importCookiesText: (t: string)   => ipcRenderer.invoke("cookies:importText", t),
-  clearCookies:      ()            => ipcRenderer.invoke("cookies:clear"),
 
   // yt-dlp binary auto-updater
   checkYtdlp:       () => ipcRenderer.invoke("ytdlp-updater:check"),

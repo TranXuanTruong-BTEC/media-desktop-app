@@ -1,189 +1,191 @@
-/**
- * src/main/core/transcriber.ts
- * Trích xuất văn bản giọng nói tiếng Trung từ video/audio → <thư mục đầu ra>/<tên file>/transcript.srt
- *
- *   ffmpeg (16kHz mono WAV)  →  whisper-cli (whisper.cpp, -l zh -osrt)  →  làm sạch SRT  →  transcript.srt
- *
- * Lưu ý Windows: whisper-cli đọc đường dẫn/đối số theo code page hệ thống, nên mọi file làm việc
- * (model, wav, args, srt) được đặt trong thư mục models và truyền bằng TÊN TƯƠNG ĐỐI (chỉ ASCII)
- * với cwd = thư mục đó. Đường dẫn Unicode của người dùng chỉ đi qua Node/ffmpeg (an toàn).
- * Prompt tiếng Trung được đưa qua file "@args" (UTF-8) thay vì dòng lệnh.
- */
-
+// src/main/core/transcriber.ts
+// Trích xuất văn bản từ file âm thanh/video: ffmpeg → WAV 16 kHz mono → whisper-cli (tiếng Trung) → SRT → các đoạn.
+// Không import electron/logger: mọi phụ thuộc (đường dẫn, cài đặt công cụ, ffmpeg) được truyền qua `deps` để test được.
+import { EventEmitter } from "events";
 import fs from "fs";
-import os from "os";
 import path from "path";
-import { spawn, ChildProcess } from "child_process";
-import { StringDecoder } from "string_decoder";
-import { app } from "electron";
-import { getBundledToolsDir, getUserToolsDir, findFfmpeg, killTree } from "./downloader.js";
-import { getModelsDir, modelPath, isModelInstalled } from "./model-downloader.js";
-import { appendCapped } from "./security.js";
-import { logger } from "./logger.js";
-import {
-  getModel, safeFolderName, parseFfmpegDuration, parseFfmpegTime, parseWhisperProgress,
-  parseSrt, cleanCues, formatSrt, previewLines, ModelId,
-} from "./transcribe-utils.js";
+import { spawn as nodeSpawn, ChildProcess, SpawnOptions } from "child_process";
+import type { TranscribeDone, TranscribeError, TranscribeProgress, TranscribeSegment, WhisperModelId } from "../../shared/ipc-types.js";
+import { UserFacingError } from "./douyin.js";
+import { parseSrt, cleanSegments, parseWhisperProgress, parseFfmpegSeconds } from "./srt.js";
+import { buildWhisperArgs, explainWhisperExit } from "./whisper.js";
+import { isValidId } from "./security.js";
 
-export interface TranscribeRequest { id: string; inputPath: string; outputDir: string; modelId: ModelId; }
-export interface TranscribeProgress { id: string; stage: "extract" | "transcribe" | "finalize"; percent: number; text?: string; }
-export interface TranscribeResult {
-  id: string; srtPath: string; folder: string; segments: number; dropped: number; preview: string[];
+export interface TranscribeEvents {
+  progress: (p: TranscribeProgress) => void;
+  done:     (d: TranscribeDone) => void;
+  error:    (e: TranscribeError) => void;
 }
-export type TranscribeOutcome =
-  | { ok: true; result: TranscribeResult }
-  | { ok: false; cancelled?: boolean; message: string };
-
-const PROMPT_ZH = "以下是普通话的句子。";      // gợi ý Whisper xuất chữ giản thể + có dấu câu
-const EXE = process.platform === "win32" ? ".exe" : "";
-
-export function getWhisperPath(): string | null {
-  for (const dir of [getUserToolsDir(), getBundledToolsDir()]) {
-    const p = path.join(dir, `whisper-cli${EXE}`);
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
+export interface Transcription extends EventEmitter {
+  on<K extends keyof TranscribeEvents>(event: K, listener: TranscribeEvents[K]): this;
+  emit<K extends keyof TranscribeEvents>(event: K, ...args: Parameters<TranscribeEvents[K]>): boolean;
 }
 
-// Chỉ chạy MỘT lượt tại một thời điểm (rất nặng CPU/RAM)
-let active: { id: string; cancel: () => void } | null = null;
-export const isTranscribing = () => active !== null;
-export function cancelTranscribe(id: string): void { if (active && active.id === id) active.cancel(); }
+export type SpawnFn = (cmd: string, args: readonly string[], opts: SpawnOptions) => ChildProcess;
 
-function tailError(buf: string): string {
-  const lines = buf.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  return lines.reverse().find(l => /error|failed|invalid|cannot|unable|not found/i.test(l)) ?? lines[0] ?? "";
+export interface TranscribeDeps {
+  /** Thư mục gốc (cwd của whisper-cli); chứa models/ và jobs/. */
+  baseDir: string;
+  ensureTools(onProgress: (percent: number, message: string) => void, signal: AbortSignal): Promise<string>;
+  /** Đảm bảo mô hình đã có tại <baseDir>/models/<file>; trả về đường dẫn tương đối (dấu /) so với baseDir. */
+  ensureModel(model: WhisperModelId, onProgress: (percent: number, message: string) => void, signal: AbortSignal): Promise<string>;
+  ffmpeg(): string | null;
+  threads: number;
+  spawn?: SpawnFn;
+  env?: NodeJS.ProcessEnv;
+  log?(message: string, extra?: unknown): void;
 }
 
-export async function transcribe(
-  req: TranscribeRequest,
-  onProgress: (p: TranscribeProgress) => void,
-): Promise<TranscribeOutcome> {
-  if (active) return { ok: false, message: "Đang có một lượt trích xuất khác. Hãy đợi nó xong." };
+export interface TranscribeJob { id: string; inputPath: string; model: WhisperModelId; }
 
-  const model = getModel(req.modelId);
-  if (!model) return { ok: false, message: "Model không hợp lệ." };
-  const whisper = getWhisperPath();
-  if (!whisper) return { ok: false, message: `Thiếu thành phần nhận diện giọng nói (whisper-cli${EXE}). Hãy cài lại bản MediaGet mới nhất.` };
-  const ffmpeg = findFfmpeg();
-  if (!ffmpeg) return { ok: false, message: "Không tìm thấy ffmpeg." };
-  if (!isModelInstalled(model)) return { ok: false, message: `Chưa tải model "${model.label}". Hãy bấm "Tải model" trước.` };
-  try { if (!fs.statSync(req.inputPath).isFile()) throw new Error(); }
-  catch { return { ok: false, message: "Không đọc được file đầu vào (đã bị xoá hoặc di chuyển?)." }; }
+const tail = (s: string, n = 2000) => (s.length > n ? s.slice(-n) : s);
 
-  const workDir  = getModelsDir();
-  const base     = `job-${req.id}`;                    // id đã được kiểm tra regex ở lớp IPC → chỉ ASCII
-  const wavFile  = `${base}.wav`;
-  const argsFile = `${base}.args`;
-  const srtFile  = `${base}.srt`;
-  const cleanup  = () => { for (const f of [wavFile, argsFile, srtFile]) { try { fs.rmSync(path.join(workDir, f), { force: true }); } catch { /* ignore */ } } };
-
+export function startTranscription(job: TranscribeJob, deps: TranscribeDeps): { emitter: Transcription; cancel: () => void } {
+  const emitter = new EventEmitter() as Transcription;
+  const ac = new AbortController();
+  const doSpawn: SpawnFn = deps.spawn ?? ((c, a, o) => nodeSpawn(c, a as string[], o));
   let cancelled = false;
-  let proc: ChildProcess | null = null;
-  active = { id: req.id, cancel: () => { cancelled = true; if (proc) killTree(proc); } };
+  let child: ChildProcess | null = null;
+  let stopPendingRef: () => void = () => {};
 
-  const emit = (stage: TranscribeProgress["stage"], percent: number, text?: string) =>
-    onProgress({ id: req.id, stage, percent: Math.max(0, Math.min(100, Math.round(percent))), text });
+  const cancel = () => {
+    cancelled = true;
+    stopPendingRef();
+    ac.abort();
+    try { child?.kill(); } catch { /* ignore */ }
+  };
 
-  try {
-    fs.mkdirSync(workDir, { recursive: true });
-    cleanup();
+  // Giới hạn tần suất: tối đa ~5 lần/giây, chỉ khi % hoặc nội dung đổi; đổi giai đoạn thì luôn phát ngay.
+  // Giá trị bị bỏ qua vì phát quá dày được giữ lại và phát sau khoảng nghỉ (để thanh tiến trình không đứng ở số cũ).
+  const MIN_GAP_MS = 200;
+  let lastKey = "", lastAt = 0, lastStage = "";
+  let pending: TranscribeProgress | null = null;
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // ── 1) ffmpeg: tách âm thanh 16kHz mono ────────────────────────────────
-    emit("extract", 0);
-    let duration: number | null = null;
-    const ff = await run(ffmpeg, [
-      "-y", "-hide_banner", "-nostdin", "-protocol_whitelist", "file,pipe",
-      "-i", req.inputPath, "-vn", "-map", "0:a:0?", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
-      path.join(workDir, wavFile),
-    ], undefined, (chunk, all) => {
-      duration ??= parseFfmpegDuration(all);
-      const t = parseFfmpegTime(chunk);
-      if (duration && t !== null) emit("extract", Math.min(100, (t / duration) * 100) * 0.1);
-    });
-    if (cancelled) return { ok: false, cancelled: true, message: "Đã huỷ." };
-    if (ff.code !== 0 || !fs.existsSync(path.join(workDir, wavFile)) || fs.statSync(path.join(workDir, wavFile)).size < 1000) {
-      const noAudio = /does not contain any stream|Stream map .* matches no streams/i.test(ff.stderr);
-      return { ok: false, message: noAudio ? "File này không có âm thanh để nhận diện." : "ffmpeg không đọc được file: " + tailError(ff.stderr) };
+  const stopPending = () => {
+    if (pendingTimer) clearTimeout(pendingTimer);
+    pendingTimer = null; pending = null;
+  };
+  stopPendingRef = stopPending;
+  const emitNow = (p: TranscribeProgress) => {
+    lastKey = `${p.stage}|${Math.floor(p.percent)}|${p.message}`; lastAt = Date.now(); lastStage = p.stage;
+    emitter.emit("progress", p);
+  };
+  const progress = (stage: TranscribeProgress["stage"], percent: number, message: string, force = false) => {
+    const p: TranscribeProgress = { id: job.id, stage, percent: Math.max(0, Math.min(100, Math.round(percent * 10) / 10)), message };
+    const key = `${stage}|${Math.floor(p.percent)}|${message}`;
+    const gap = Date.now() - lastAt;
+    if (force || stage !== lastStage) { stopPending(); emitNow(p); return; }
+    if (key === lastKey) return;
+    if (gap >= MIN_GAP_MS) { stopPending(); emitNow(p); return; }
+    pending = p;
+    if (!pendingTimer) {
+      pendingTimer = setTimeout(() => {
+        pendingTimer = null;
+        const q = pending; pending = null;
+        if (q && !cancelled) emitNow(q);
+      }, MIN_GAP_MS - gap);
     }
+  };
 
-    // ── 2) whisper-cli ─────────────────────────────────────────────────────
-    const threads = Math.max(2, Math.min(8, os.cpus().length - 1));
-    const common = ["-m", model.file, "-f", wavFile, "-of", base, "-osrt", "-l", "zh", "-pp", "-sns", "-t", String(threads)];
-    emit("transcribe", 10);
+  void (async () => {
+    const jobRel = `jobs/${job.id}`;
+    const jobDir = path.join(deps.baseDir, "jobs", job.id);
+    try {
+      await new Promise<void>(r => setImmediate(r));          // để nơi gọi kịp gắn listener
+      if (cancelled) return;
+      if (!isValidId(job.id)) throw new UserFacingError("Yêu cầu không hợp lệ.");
 
-    const runWhisper = (withPrompt: boolean) => {
-      let args: string[];
-      if (withPrompt) {
-        fs.writeFileSync(path.join(workDir, argsFile), [...common, "--prompt", PROMPT_ZH].join("\n") + "\n", "utf8");
-        args = [`@${argsFile}`];
-      } else {
-        args = common;
+      // 1) công cụ + mô hình (tải ở lần đầu)
+      const exe = await deps.ensureTools((p, m) => progress("tools", p, m), ac.signal);
+      if (cancelled) return;
+      const modelRel = await deps.ensureModel(job.model, (p, m) => progress("model", p, m), ac.signal);
+      if (cancelled) return;
+
+      // 2) ffmpeg: bất kỳ audio/video → WAV 16 kHz mono
+      const ffmpeg = deps.ffmpeg();
+      if (!ffmpeg) throw new UserFacingError("Không tìm thấy ffmpeg.exe để đọc âm thanh từ file.");
+      fs.rmSync(jobDir, { recursive: true, force: true });
+      fs.mkdirSync(jobDir, { recursive: true });
+      const wavAbs = path.join(jobDir, "audio.wav");
+
+      progress("audio", 0, "Đang trích âm thanh từ file...", true);
+      await new Promise<void>((resolve, reject) => {
+        const c = doSpawn(ffmpeg, ["-y", "-hide_banner", "-nostdin", "-stats_period", "1", "-i", job.inputPath,
+          "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wavAbs], { windowsHide: true, env: deps.env });
+        child = c;
+        let err = "", total: number | null = null;
+        c.stderr?.setEncoding("utf8");
+        c.stderr?.on("data", (d: string) => {
+          err = tail(err + d);
+          total = total ?? parseFfmpegSeconds(d, "Duration:");
+          const t = parseFfmpegSeconds(d, "time=");
+          if (t !== null && total) progress("audio", (t / total) * 100, "Đang trích âm thanh từ file...");
+        });
+        c.on("error", (e) => reject(new UserFacingError(`Không chạy được ffmpeg: ${e.message}`)));
+        c.on("close", (code) => {
+          child = null;
+          if (cancelled) return resolve();
+          if (code === 0) return resolve();
+          if (/does not contain any stream|matches no streams|no audio/i.test(err)) return reject(new UserFacingError("File này không có âm thanh để nhận diện."));
+          if (/invalid data found|no such file|permission denied|moov atom not found/i.test(err)) return reject(new UserFacingError("Không đọc được file (định dạng không hỗ trợ, file hỏng hoặc không có quyền truy cập)."));
+          reject(new UserFacingError(`ffmpeg lỗi (mã ${code}): ${err.trim().split(/\r?\n/).pop() ?? ""}`));
+        });
+      });
+      if (cancelled) return;
+
+      // 3) whisper-cli (cwd = baseDir, chỉ truyền đường dẫn tương đối do app đặt)
+      progress("recognize", 0, "Đang nhận diện giọng nói...", true);
+      const args = buildWhisperArgs({ modelRel, wavRel: `${jobRel}/audio.wav`, outBaseRel: `${jobRel}/transcript`, threads: deps.threads });
+      deps.log?.("Chạy whisper-cli", { model: job.model, threads: deps.threads });
+
+      await new Promise<void>((resolve, reject) => {
+        const c = doSpawn(exe, args, { cwd: deps.baseDir, windowsHide: true, env: deps.env });
+        child = c;
+        let err = "";
+        c.stdout?.on("data", () => { /* chỉ cần tiêu thụ để pipe không đầy */ });
+        c.stderr?.setEncoding("utf8");
+        c.stderr?.on("data", (d: string) => {
+          err = tail(err + d);
+          const p = parseWhisperProgress(d);
+          if (p !== null) progress("recognize", p, "Đang nhận diện giọng nói...");
+        });
+        c.on("error", (e) => reject(new UserFacingError(
+          (e as NodeJS.ErrnoException).code === "ENOENT"
+            ? "Không tìm thấy công cụ nhận diện (whisper-cli). Hãy thử lại để app tải lại."
+            : `Không chạy được công cụ nhận diện: ${e.message}`)));
+        c.on("close", (code) => {
+          child = null;
+          if (cancelled) return resolve();
+          if (code === 0) return resolve();
+          reject(new UserFacingError(explainWhisperExit(code, err)));
+        });
+      });
+      if (cancelled) return;
+
+      // 4) đọc SRT do whisper ghi
+      const srtPath = path.join(jobDir, "transcript.srt");
+      if (!fs.existsSync(srtPath)) throw new UserFacingError("Công cụ nhận diện không tạo ra file kết quả.");
+      const segments: TranscribeSegment[] = cleanSegments(parseSrt(fs.readFileSync(srtPath, "utf8")));
+      if (segments.length === 0) {
+        throw new UserFacingError("Không nhận diện được lời nói nào trong file (có thể chỉ có nhạc/tiếng ồn, âm lượng quá nhỏ hoặc không phải tiếng Trung).");
       }
-      const dec = new StringDecoder("utf8");
-      return run(whisper, args, workDir, (chunk, _all, isErr) => {
-        if (isErr) {
-          const p = parseWhisperProgress(chunk);
-          if (p !== null) emit("transcribe", 10 + p * 0.88);
-        } else {
-          const text = dec.write(Buffer.from(chunk, "latin1"));
-          const m = [...text.matchAll(/\]\s+(.+)$/gm)].pop();
-          if (m) emit("transcribe", -1, m[1].trim());
-        }
-      }, true);
-    };
-
-    let w = await runWhisper(true);
-    if (!cancelled && w.code !== 0 && /unknown argument|response file/i.test(w.stderr)) {
-      logger.warn("transcriber", "whisper-cli không hỗ trợ @args — thử lại không có prompt");
-      w = await runWhisper(false);
+      progress("recognize", 100, "Hoàn tất", true);
+      stopPending();
+      emitter.emit("done", { id: job.id, segments });
+    } catch (err) {
+      stopPending();
+      if (cancelled) return;
+      const e = err as Error;
+      deps.log?.("Trích xuất văn bản thất bại", { err: e.message });
+      emitter.emit("error", {
+        id: job.id,
+        message: e instanceof UserFacingError ? e.message : `Không trích xuất được văn bản: ${e.message}`,
+      });
+    } finally {
+      try { fs.rmSync(jobDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
-    if (cancelled) return { ok: false, cancelled: true, message: "Đã huỷ." };
-    if (w.code !== 0) {
-      logger.error("transcriber", "whisper-cli lỗi", { code: w.code, err: w.stderr.slice(-500) });
-      const oom = /out of memory|bad_alloc|failed to allocate/i.test(w.stderr);
-      return { ok: false, message: oom ? "Không đủ RAM cho model này. Hãy chọn model \"Nhanh\"." : "Nhận diện thất bại: " + (tailError(w.stderr) || `mã lỗi ${w.code}`) };
-    }
+  })();
 
-    // ── 3) Làm sạch & ghi transcript.srt ───────────────────────────────────
-    emit("finalize", 99);
-    const rawPath = path.join(workDir, srtFile);
-    if (!fs.existsSync(rawPath)) return { ok: false, message: "whisper-cli không tạo ra file SRT." };
-    const { cues, dropped } = cleanCues(parseSrt(fs.readFileSync(rawPath, "utf8")));
-    if (cues.length === 0) return { ok: false, message: "Không nhận diện được lời nói nào trong file (im lặng, chỉ có nhạc, hoặc không phải tiếng Trung)." };
-
-    const folder = path.join(req.outputDir, safeFolderName(path.basename(req.inputPath, path.extname(req.inputPath))));
-    fs.mkdirSync(folder, { recursive: true });
-    const srtPath = path.join(folder, "transcript.srt");
-    const tmp = `${srtPath}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, formatSrt(cues), "utf8");
-    fs.renameSync(tmp, srtPath);
-
-    emit("finalize", 100);
-    return { ok: true, result: { id: req.id, srtPath, folder, segments: cues.length, dropped, preview: previewLines(cues) } };
-  } catch (e: any) {
-    if (cancelled) return { ok: false, cancelled: true, message: "Đã huỷ." };
-    logger.error("transcriber", "Lỗi không mong muốn", e);
-    return { ok: false, message: e?.code === "ENOSPC" ? "Ổ đĩa đã đầy." : (e?.message ?? String(e)) };
-  } finally {
-    cleanup();
-    active = null;
-  }
-
-  // ── helper: chạy tiến trình, gom stdout/stderr (có giới hạn) ───────────────
-  function run(
-    exe: string, args: string[], cwd: string | undefined,
-    onChunk: (chunk: string, all: string, isErr: boolean) => void,
-    stdoutToo = false,
-  ): Promise<{ code: number | null; stderr: string }> {
-    return new Promise((resolve) => {
-      const p = spawn(exe, args, { cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-      proc = p;
-      let err = "";
-      p.stderr!.on("data", (b: Buffer) => { const s = b.toString("utf8"); err = appendCapped(err, s, 64 * 1024); onChunk(s, err, true); });
-      p.stdout!.on("data", (b: Buffer) => { if (stdoutToo) onChunk(b.toString("latin1"), "", false); });
-      p.on("error", (e) => { err += String(e); resolve({ code: -1, stderr: err }); });
-      p.on("close", (code) => { proc = null; resolve({ code, stderr: err }); });
-    });
-  }
+  return { emitter, cancel };
 }

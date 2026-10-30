@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useDownload }         from "./hooks/useDownload";
 import { useUpdater }          from "./hooks/useUpdater";
 import { useYtdlpUpdater }     from "./hooks/useYtdlpUpdater";
+import { useTranscribe }       from "./hooks/useTranscribe";
 import { DownloadForm }        from "./components/DownloadForm";
 import { DownloadItemRow }     from "./components/DownloadItem";
 import { StatusBar }           from "./components/StatusBar";
@@ -12,8 +13,7 @@ import { YtdlpUpdateBanner }   from "./components/YtdlpUpdateBanner";
 import { Sidebar, NavId }      from "./components/Sidebar";
 import { SettingsPage }        from "./components/SettingsPage";
 import { AboutPage }           from "./components/AboutPage";
-import { TranscribePage }       from "./components/TranscribePage";
-import { useTranscribe }        from "./hooks/useTranscribe";
+import { TranscribePage }      from "./components/TranscribePage";
 import { ConfirmDialog }       from "./components/ConfirmDialog";
 import { VideoQuality }        from "../../shared/ipc-types";
 
@@ -45,7 +45,7 @@ export default function App() {
   } = useDownload(outputDir);
   const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
   const { state: ytdlpState, checkNow, forceUpdate, dismiss: dismissYtdlp } = useYtdlpUpdater();
-  const transcribeApi = useTranscribe();
+  const transcribe = useTranscribe();
 
   useEffect(() => {
     window.api?.getDefaultDir?.().then(d => { if (d) setOutputDir(d); }).catch(() => {});
@@ -212,14 +212,7 @@ export default function App() {
 
           {nav === "about" && <AboutPage version={appVersion} />}
 
-          {nav === "transcribe" && (
-            <TranscribePage
-              t={transcribeApi}
-              outputDir={outputDir}
-              onSelectDir={handleSelectDir}
-              onOpenPath={(p) => (window as any).api?.openPath?.(p)}
-            />
-          )}
+          {nav === "transcribe" && <TranscribePage api={transcribe} />}
 
           {(nav === "trim" || nav === "compress" || nav === "audio") && (
             <ComingSoon page={nav} />

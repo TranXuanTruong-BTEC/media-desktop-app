@@ -169,55 +169,502 @@ test("link khác giữ nguyên; không có link → null; không đụng YouTube
   assert.strictEqual(urlmod.normalizeDownloadUrl("https://v.douyin.com/x/https://v.douyin.com/y/"), "https://v.douyin.com/x/");
 });
 
+console.log("cookies (parse + trình duyệt)");
+const ck = require("../dist-electron/main/core/cookies.js");
+test("parse cookies Netscape: giữ cookie hợp lệ, bỏ chú thích/dòng rác", () => {
+  const r = ck.parseCookiesText("# c\n.a.com\tTRUE\t/\tTRUE\t1793673935\tsid\tv1\n#HttpOnly_.b.com\tTRUE\t/\tTRUE\t0\tx\ty\nrác\n");
+  assert.ok(r.ok); assert.strictEqual(r.summary.count, 2); assert.deepStrictEqual(r.summary.domains, ["a.com", "b.com"]);
+  assert.ok(r.text.startsWith("# Netscape HTTP Cookie File\n"));
+});
+test("parse cookies: chịu được BOM, CRLF, tab bị đổi thành dấu cách; cho phép tên rỗng", () => {
+  assert.ok(ck.parseCookiesText("\uFEFF.a.com TRUE / TRUE 1793673935 sid abc\r\n").ok);
+  assert.ok(ck.parseCookiesText("www.a.com\tFALSE\t/\tFALSE\t0\t\tvalue").ok);
+});
+test("parse cookies: từ chối JSON, rỗng, rác, quá lớn, không phải string", () => {
+  for (const bad of ['[{"name":"a"}]', "   ", "hello world", "a".repeat(2 * 1024 * 1024 + 1), 123, null, "a\0b"]) assert.ok(!ck.parseCookiesText(bad).ok, String(bad).slice(0, 20));
+});
+test("isCookieBrowser: chỉ nhận whitelist", () => {
+  for (const b of ["none", "firefox", "edge", "chrome", "brave"]) assert.ok(ck.isCookieBrowser(b), b);
+  for (const b of ["", "safari", "firefox --evil", "../x", null, 1, undefined, "FIREFOX"]) assert.ok(!ck.isCookieBrowser(b), String(b));
+});
+test("usesBrowserCookies: chỉ Douyin/TikTok (kể cả subdomain), không khớp hậu tố giả", () => {
+  for (const u of ["https://www.douyin.com/video/1", "https://v.douyin.com/AbC/", "https://www.iesdouyin.com/share/video/1", "https://www.tiktok.com/@a/video/1", "https://vm.tiktok.com/Z/"])
+    assert.ok(ck.usesBrowserCookies(u), u);
+  for (const u of ["https://www.youtube.com/watch?v=a", "https://evildouyin.com/x", "https://douyin.com.evil.io/x", "https://facebook.com/x", "không phải url"])
+    assert.ok(!ck.usesBrowserCookies(u), u);
+});
 
-console.log("transcribe-utils (SRT / model / tiến độ)");
-const tu = require("../dist-electron/main/core/transcribe-utils.js");
-test("catalog model hợp lệ (sha1 40 hex, id/file duy nhất, có model mặc định)", () => {
-  const ids = new Set(), files = new Set();
-  for (const m of tu.WHISPER_MODELS) {
-    assert.match(m.sha1, /^[0-9a-f]{40}$/); assert.match(m.file, /^ggml-[a-z0-9._-]+\.bin$/);
-    ids.add(m.id); files.add(m.file); assert.ok(m.sizeMB > 100);
-    assert.strictEqual(new URL(tu.modelUrl(m.file)).hostname, "huggingface.co");
+console.log("cookies (tự lấy qua cửa sổ đăng nhập)");
+const NOW = 1_800_000_000;
+const sample = [
+  { name: "sessionid", value: "abc", domain: ".douyin.com", hostOnly: false, path: "/", secure: true, httpOnly: true, session: false, expirationDate: NOW + 1000 },
+  { name: "s_v_web_id", value: "v1", domain: "www.douyin.com", hostOnly: true, path: "/", secure: false, httpOnly: false, session: true },
+  { name: "old", value: "x", domain: ".douyin.com", hostOnly: false, path: "/", secure: false, httpOnly: false, session: false, expirationDate: NOW - 5 },
+  { name: "track", value: "t", domain: ".google.com", hostOnly: false, path: "/", secure: true, httpOnly: false, session: false, expirationDate: NOW + 99 },
+  { name: "evil", value: "a\tb", domain: ".douyin.com", hostOnly: false, path: "/", secure: false, httpOnly: false, session: true },
+];
+test("isCookieSite: chỉ douyin / tiktok", () => {
+  assert.ok(ck.isCookieSite("douyin") && ck.isCookieSite("tiktok"));
+  for (const v of ["youtube", "", "__proto__", "constructor", null, 1]) assert.ok(!ck.isCookieSite(v), String(v));
+});
+test("domainMatches: khớp subdomain, không khớp hậu tố giả / tên miền khác", () => {
+  const d = ["douyin.com"];
+  for (const x of [".douyin.com", "www.douyin.com", "#HttpOnly_.douyin.com", "douyin.com"]) assert.ok(ck.domainMatches(x, d), x);
+  for (const x of ["evildouyin.com", "douyin.com.evil.io", ".google.com", ""]) assert.ok(!ck.domainMatches(x, d), x);
+});
+test("isLoggedIn: cần cookie sessionid không rỗng đúng tên miền", () => {
+  assert.ok(ck.isLoggedIn(sample, ["douyin.com"]));
+  assert.ok(!ck.isLoggedIn(sample, ["tiktok.com"]));
+  assert.ok(!ck.isLoggedIn([{ name: "sessionid", value: "", domain: ".douyin.com" }], ["douyin.com"]));
+});
+test("toNetscapeLines: đúng 7 cột, HttpOnly, session=0, bỏ hết hạn / tên miền khác / ký tự lạ", () => {
+  const lines = ck.toNetscapeLines(sample, ["douyin.com"], NOW);
+  assert.strictEqual(lines.length, 2);
+  assert.deepStrictEqual(lines[0].split("\t"), ["#HttpOnly_.douyin.com", "TRUE", "/", "TRUE", String(NOW + 1000), "sessionid", "abc"]);
+  assert.deepStrictEqual(lines[1].split("\t"), ["www.douyin.com", "FALSE", "/", "FALSE", "0", "s_v_web_id", "v1"]);
+  const parsed = ck.parseCookiesText(lines.join("\n"));
+  assert.ok(parsed.ok && parsed.summary.count === 2);   // chạy lại qua bộ parse của app vẫn hợp lệ
+});
+test("mergeCookieText: thay cookie của trang, giữ cookie trang khác, bỏ chú thích cũ", () => {
+  const existing = "# Netscape HTTP Cookie File\n.douyin.com\tTRUE\t/\tTRUE\t99\told\t1\n.youtube.com\tTRUE\t/\tTRUE\t99\tyt\t2\n";
+  const merged = ck.mergeCookieText(existing, ck.toNetscapeLines(sample, ["douyin.com"], NOW), ["douyin.com"]);
+  assert.ok(merged.startsWith("# Netscape HTTP Cookie File\n"));
+  assert.ok(merged.includes("\tyt\t2") && !merged.includes("\told\t1") && merged.includes("\tsessionid\tabc"));
+  assert.strictEqual(ck.mergeCookieText(null, ["a.com\tFALSE\t/\tFALSE\t0\tn\tv"], ["douyin.com"]).split("\n").length, 3);
+});
+test("isSafeUserAgent: nhận UA Chrome, từ chối rỗng / xuống dòng / quá dài / không phải string", () => {
+  assert.ok(ck.isSafeUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
+  for (const v of ["", "short", "Mozilla/5.0\nX-Evil: 1 aaaaaaaa", "a".repeat(301), "Mozilla/5.0 (Windows) tiếng Việt", null, 5]) assert.ok(!ck.isSafeUserAgent(v), String(v).slice(0, 20));
+});
+
+console.log("douyin (phân tích dữ liệu / chọn bản / tên file / link an toàn)");
+const dy = require("../dist-electron/main/core/douyin.js");
+const dd = require("../dist-electron/main/core/douyin-download.js");
+const http = require("http");
+
+// Dạng phản hồi API aweme/v1/web/aweme/detail (snake_case) — theo cấu trúc yt-dlp đọc
+const apiResp = { aweme_detail: {
+  aweme_id: "7699825880927022265", desc: "Clip: vui/lắm?", author: { nickname: "Tác giả" },
+  video: {
+    width: 1080, height: 1920,
+    play_addr: { url_list: ["https://aweme.snssdk.com/aweme/v1/play/?video_id=x", "//v3.douyinvod.com/a/video.mp4?x=1"], width: 720, height: 1280, url_key: "v0_h264_720p" },
+    download_addr: { url_list: ["https://wm.example.com/wm.mp4"], width: 720 },
+    has_watermark: true,
+    bit_rate: [
+      { gear_name: "h264_1080", bit_rate: 2500000, is_bytevc1: 0, play_addr: { url_list: ["https://v26.douyinvod.com/h264_1080.mp4"], width: 1080, height: 1920 } },
+      { gear_name: "h265_1080", bit_rate: 1800000, is_bytevc1: 1, play_addr: { url_list: ["https://v26.douyinvod.com/h265_1080.mp4"], width: 1080, height: 1920 } },
+      { gear_name: "h264_540",  bit_rate: 900000,  is_bytevc1: 0, play_addr: { url_list: ["https://v26.douyinvod.com/h264_540.mp4"],  width: 540,  height: 960 } },
+      { gear_name: "vvc",       bit_rate: 700000,  is_bytevc1: 0, play_addr: { url_list: ["https://v26.douyinvod.com/vvc.mp4"], url_key: "x_bytevc2_540p", width: 540, height: 960 } },
+    ],
+  },
+} };
+test("parseAwemeDetail (API): id, tiêu đề, tác giả, bỏ bản bytevc2, link CDN trước link API", () => {
+  const m = dy.parseAwemeDetail(apiResp, "7699825880927022265");
+  assert.strictEqual(m.id, "7699825880927022265"); assert.strictEqual(m.author, "Tác giả"); assert.strictEqual(m.isImagePost, false);
+  assert.ok(!m.candidates.some(c => c.urls[0].includes("vvc.mp4")));
+  const pa = m.candidates[0];
+  assert.strictEqual(pa.urls[0], "https://v3.douyinvod.com/a/video.mp4?x=1");        // "//" → https, CDN trước
+  assert.ok(pa.urls[1].includes("/aweme/v1/play/"));
+  assert.ok(!m.candidates.some(c => c.urls[0].includes("wm.example.com")));           // watermark bị bỏ khi còn bản khác
+});
+test("parseAwemeDetail: sai ID mong muốn → null; thiếu video → null; rác → null", () => {
+  assert.strictEqual(dy.parseAwemeDetail(apiResp, "1234567890123"), null);
+  assert.strictEqual(dy.parseAwemeDetail({ aweme_detail: { aweme_id: "7699825880927022265" } }), null);
+  for (const v of [null, 5, "x", [], {}]) assert.strictEqual(dy.parseAwemeDetail(v), null);
+});
+test("parseAwemeDetail (RENDER_DATA kiểu camelCase, lồng sâu): tìm đúng video theo ID", () => {
+  const rd = { app: { x: 1 }, "abc": { aweme: { detail: {
+    awemeId: "7699825880927022265", desc: "x", authorInfo: { nickname: "N" },
+    video: { width: 720, height: 1280, playAddr: [{ src: "//p.douyinvod.com/v.mp4" }], bitRateList: [
+      { bitRate: 1000, isBytevc1: 0, width: 720, height: 1280, playAddr: [{ src: "https://p.douyinvod.com/r1.mp4" }] } ] } } },
+    other: { awemeId: "999999999999", video: { playAddr: [{ src: "https://o.com/o.mp4" }] } } } };
+  const m = dy.parseAwemeDetail(rd, "7699825880927022265");
+  assert.strictEqual(m.id, "7699825880927022265"); assert.strictEqual(m.author, "N");
+  assert.deepStrictEqual(m.candidates.map(c => c.urls[0]), ["https://p.douyinvod.com/v.mp4", "https://p.douyinvod.com/r1.mp4"]);
+});
+test("parseAwemeDetail: bài ảnh → isImagePost, không có candidate", () => {
+  const m = dy.parseAwemeDetail({ aweme_detail: { aweme_id: "7699825880927022265", images: [{}], video: { play_addr: { url_list: [] } } } });
+  assert.ok(m.isImagePost); assert.strictEqual(m.candidates.length, 0);
+});
+test("pickCandidate: tốt nhất ưu tiên độ phân giải rồi H.264; giới hạn 720p/360p; âm thanh lấy bản nhỏ nhất", () => {
+  const c = dy.parseAwemeDetail(apiResp).candidates;
+  assert.ok(dy.pickCandidate(c, "best").urls[0].endsWith("h264_1080.mp4"));
+  assert.ok(dy.pickCandidate(c, "bestvideo+bestaudio").urls[0].endsWith("h264_1080.mp4"));
+  assert.ok(dy.pickCandidate(c, "1080p").urls[0].endsWith("h264_1080.mp4"));
+  assert.ok(dy.pickCandidate(c, "720p").urls[0].includes("video.mp4"));               // 720x1280 → cạnh ngắn 720
+  assert.ok(dy.pickCandidate(c, "360p").urls[0].endsWith("h264_540.mp4"));            // không bản nào ≤360 → nhỏ nhất
+  assert.ok(dy.pickCandidate(c, "audio_mp3").urls[0].endsWith("h264_540.mp4"));
+  assert.strictEqual(dy.pickCandidate([], "best"), null);
+});
+test("safeFilename: bỏ ký tự cấm, cắt theo ký tự Unicode, tên thiết bị, rỗng → fallback", () => {
+  assert.strictEqual(dy.safeFilename('Clip: vui/lắm?\n*', "fb"), "Clip vui lắm");
+  assert.strictEqual(dy.safeFilename("   ...  ", "fb"), "fb");
+  assert.strictEqual(dy.safeFilename("CON", "fb"), "_CON");
+  assert.strictEqual(Array.from(dy.safeFilename("😀".repeat(300), "fb")).length, 100);
+  assert.ok(!/[<>:"/\\|?*\u0000-\u001f]/.test(dy.safeFilename('a<b>c:"d"/e\\f|g?h*i\u0001', "fb")));
+});
+test("isSafeMediaUrl: chỉ http(s) tới host công cộng", () => {
+  for (const u of ["https://v3.douyinvod.com/a.mp4", "http://cdn.example.com/x"]) assert.ok(dy.isSafeMediaUrl(u), u);
+  for (const u of ["file:///etc/passwd", "ftp://a.com/x", "http://localhost/x", "http://127.0.0.1/x", "http://10.0.0.5/x", "http://192.168.1.1/x",
+    "http://172.20.0.1/x", "http://169.254.169.254/latest", "http://[::1]/x", "http://user:pw@a.com/x", "http://a.local/x", "không phải url"])
+    assert.ok(!dy.isSafeMediaUrl(u), u);
+});
+test("isDouyinUrl / extractAwemeId", () => {
+  for (const u of ["https://www.douyin.com/video/7699825880927022265", "https://v.douyin.com/AbC123/", "https://www.iesdouyin.com/share/video/1"]) assert.ok(dy.isDouyinUrl(u), u);
+  for (const u of ["https://evildouyin.com/x", "https://douyin.com.evil.io/", "https://www.tiktok.com/@a/video/1", "xx"]) assert.ok(!dy.isDouyinUrl(u), u);
+  assert.strictEqual(dy.extractAwemeId("https://www.douyin.com/video/7699825880927022265?x=1"), "7699825880927022265");
+  assert.strictEqual(dy.extractAwemeId("https://v.douyin.com/AbC123/"), null);
+});
+
+console.log("douyin-download (chạy thật với server cục bộ)");
+const BODY = Buffer.alloc(300_000, 7);
+const srv = http.createServer((req, res) => {
+  const seen = (srv.seen ||= []); seen.push({ url: req.url, referer: req.headers.referer, ua: req.headers["user-agent"] });
+  if (req.url === "/video.mp4") { res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": BODY.length }); res.end(BODY); }
+  else if (req.url === "/redir") { res.writeHead(302, { Location: "/video.mp4" }); res.end(); }
+  else if (req.url === "/loop") { res.writeHead(302, { Location: "/loop" }); res.end(); }
+  else if (req.url === "/html") { res.writeHead(200, { "Content-Type": "text/html" }); res.end("<html>expired</html>"); }
+  else if (req.url === "/403") { res.writeHead(403); res.end(); }
+  else if (req.url === "/short") { res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": 1000 }); res.write(Buffer.alloc(100)); setTimeout(() => res.destroy(), 30); }
+  else if (req.url === "/slow") { res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": BODY.length }); res.write(BODY.subarray(0, 1000)); }
+  else { res.writeHead(404); res.end(); }
+});
+await new Promise(r => srv.listen(0, "127.0.0.1", r));
+const srvBase = `http://127.0.0.1:${srv.address().port}`;
+const tmpd = fs.mkdtempSync(path.join(os.tmpdir(), "dy-test-"));
+const dl = (u, name, signal) => dd.downloadToFile(srvBase + u, path.join(tmpd, name), { headers: { Referer: "https://www.douyin.com/", "User-Agent": "UA-TEST" }, signal: signal || new AbortController().signal, onProgress() {}, allowPrivate: true });
+
+await atest("downloadToFile: tải đủ file, gửi Referer + User-Agent, theo chuyển hướng", async () => {
+  await dl("/redir", "ok.bin");
+  assert.strictEqual(fs.statSync(path.join(tmpd, "ok.bin")).size, BODY.length);
+  const last = srv.seen[srv.seen.length - 1];
+  assert.strictEqual(last.referer, "https://www.douyin.com/"); assert.strictEqual(last.ua, "UA-TEST");
+});
+await atest("downloadToFile: từ chối HTML, HTTP 403, 404, vòng lặp chuyển hướng, file bị cắt — và không để lại file dở", async () => {
+  for (const [u, re] of [["/html", /không trả về video/], ["/403", /HTTP 403/], ["/nope", /HTTP 404/], ["/loop", /chuyển hướng/], ["/short", /ngắt|đủ dung lượng/]]) {
+    await assert.rejects(() => dl(u, "bad.bin"), re, u);
+    assert.ok(!fs.existsSync(path.join(tmpd, "bad.bin")), "không để lại file dở: " + u);
   }
-  assert.strictEqual(ids.size, tu.WHISPER_MODELS.length); assert.strictEqual(files.size, tu.WHISPER_MODELS.length);
-  assert.strictEqual(tu.getModel("turbo").file, "ggml-large-v3-turbo-q5_0.bin");
-  assert.strictEqual(tu.getModel("../../x"), null);
 });
-test("allowlist redirect của model: HF + CDN .hf.co được, host giả bị chặn", () => {
-  const base = tu.modelUrl("ggml-small.bin");
-  for (const l of ["https://cas-bridge.xethub.hf.co/a?sig=1", "https://cdn-lfs.huggingface.co/x", "/api/resolve-cache/x"])
-    assert.ok(sec.resolveSafeRedirect(l, base, tu.MODEL_HOSTS), l);
-  for (const l of ["http://huggingface.co/x", "https://huggingface.co.evil.com/x", "https://evilhf.co/x", "https://github.com/x"])
-    assert.strictEqual(sec.resolveSafeRedirect(l, base, tu.MODEL_HOSTS), null, l);
+await atest("downloadToFile: chặn link nội bộ khi không bật allowPrivate", async () => {
+  await assert.rejects(() => dd.downloadToFile(srvBase + "/video.mp4", path.join(tmpd, "x.bin"), { headers: {}, signal: new AbortController().signal, onProgress() {} }), /không hợp lệ/);
 });
-test("isMediaFile chỉ nhận đuôi media", () => {
-  for (const f of ["C:\\v\\a.MP4", "/x/测试.mkv", "D:\\a b\\c.m4a"]) assert.ok(tu.isMediaFile(f), f);
-  for (const f of ["C:\\a.exe", "x.txt", "noext", "", null, 5, "a.mp4\0.exe"]) assert.ok(!tu.isMediaFile(f), String(f));
+await atest("downloadToFile: huỷ giữa chừng → reject 'cancelled' và xoá file dở", async () => {
+  const ac = new AbortController();
+  const p = dl("/slow", "cancel.bin", ac.signal);
+  setTimeout(() => ac.abort(), 150);
+  await assert.rejects(() => p, /cancelled/);
+  assert.ok(!fs.existsSync(path.join(tmpd, "cancel.bin")));
 });
-test("safeFolderName: bỏ ký tự cấm, tên thiết bị, dấu chấm cuối", () => {
-  assert.strictEqual(tu.safeFolderName('a<b>:c"/d\\e|f?g*h'), "a b c d e f g h");
-  assert.strictEqual(tu.safeFolderName("电影解说 第1集."), "电影解说 第1集");
-  assert.strictEqual(tu.safeFolderName("CON"), "video"); assert.strictEqual(tu.safeFolderName("..."), "video");
-  assert.strictEqual(tu.safeFolderName("x".repeat(200)).length, 80);
+
+const mkReq = (quality) => ({ id: "abcd1234", url: "https://www.douyin.com/video/7699825880927022265", quality, outputDir: tmpd });
+const collect = (h) => new Promise(resolve => { const ev = { progress: [] }; h.emitter.on("progress", p => ev.progress.push(p)); h.emitter.on("complete", c => resolve({ ...ev, complete: c })); h.emitter.on("error", e => resolve({ ...ev, error: e })); });
+const fakeMedia = (urls, extra = {}) => ({ id: "7699825880927022265", title: "Clip: vui/lắm?", author: "A", isImagePost: false, candidates: [{ urls, width: 720, height: 1280, bitrate: 1, hevc: false }], ...extra });
+
+await atest("startDouyinDownload: luồng đầy đủ → file .mp4 đúng tên, đủ dung lượng, có progress, link đầu hỏng thì thử link sau", async () => {
+  const h = dd.startDouyinDownload(mkReq("best"), { extract: () => ({ promise: Promise.resolve(fakeMedia([srvBase + "/403", srvBase + "/video.mp4"])), cancel() {} }), ffmpeg: () => null, allowPrivate: true });
+  const r = await collect(h);
+  assert.ok(r.complete, JSON.stringify(r.error));
+  assert.strictEqual(r.complete.filename, "Clip vui lắm.mp4");
+  assert.strictEqual(fs.statSync(r.complete.filepath).size, BODY.length);
+  assert.ok(!fs.existsSync(r.complete.filepath + ".part"));
+  assert.ok(r.progress.length >= 2 && r.progress[0].percent === 0 && /Douyin/.test(r.progress[0].filename));
+  assert.ok(r.progress.some(p => p.percent === 100));
+  const h2 = dd.startDouyinDownload(mkReq("best"), { extract: () => ({ promise: Promise.resolve(fakeMedia([srvBase + "/video.mp4"])), cancel() {} }), ffmpeg: () => null, allowPrivate: true });
+  assert.strictEqual((await collect(h2)).complete.filename, "Clip vui lắm (1).mp4");   // không ghi đè file cũ
 });
-test("parse tiến độ ffmpeg / whisper", () => {
-  assert.strictEqual(tu.parseFfmpegDuration("  Duration: 00:01:23.50, start"), 83.5);
-  assert.strictEqual(tu.parseFfmpegTime("size=1kB time=00:00:05.00 bitrate\rsize=2kB time=00:00:12.50 x"), 12.5);
-  assert.strictEqual(tu.parseWhisperProgress("progress =   5%\nprogress =  45%\n"), 45);
-  assert.strictEqual(tu.parseWhisperProgress("progress = 601%"), 100);
-  assert.strictEqual(tu.parseWhisperProgress("nope"), null);
+await atest("startDouyinDownload: lỗi thân thiện — bài ảnh, không có link, hết hạn, thiếu ffmpeg cho âm thanh", async () => {
+  const run = (media, q = "best") => collect(dd.startDouyinDownload(mkReq(q), { extract: () => ({ promise: Promise.resolve(media), cancel() {} }), ffmpeg: () => null, allowPrivate: true }));
+  assert.match((await run(fakeMedia([], { candidates: [], isImagePost: true }))).error.message, /bài đăng dạng ảnh/);
+  assert.match((await run(fakeMedia([], { candidates: [] }))).error.message, /không trả về link video/);
+  assert.match((await run(fakeMedia([srvBase + "/html"]))).error.message, /Không tải được video Douyin.*không trả về video/);
+  assert.match((await run(fakeMedia([srvBase + "/video.mp4"]), "audio_mp3")).error.message, /ffmpeg/);
+  assert.deepStrictEqual(fs.readdirSync(tmpd).filter(f => f.endsWith(".part")), []);
 });
-test("SRT: parse → clean → format (lọc nhiễu, ảo giác, vòng lặp ≥3)", () => {
-  const src = "\uFEFF1\r\n00:00:00,000 --> 00:00:02,000\r\n你好\r\n\r\n2\r\n00:00:02.000 --> 00:00:03.500\r\n[BLANK_AUDIO]\r\n\r\n" +
-    "3\r\n00:00:03,500 --> 00:00:05,000\r\n字幕由Amara.org社区提供\r\n\r\n" + [6,7,8,9].map(i => `${i}\n00:00:0${i},000 --> 00:00:0${i},900\n好的。\n`).join("\n");
-  const cues = tu.parseSrt(src);
-  assert.strictEqual(cues.length, 7); assert.strictEqual(cues[1].start, "00:00:02,000");
-  const { cues: out, dropped } = tu.cleanCues(cues);
-  assert.deepStrictEqual(out.map(c => c.text), ["你好", "好的。", "好的。"]); assert.strictEqual(dropped, 4);
-  assert.ok(tu.formatSrt(out).startsWith("1\n00:00:00,000 --> 00:00:02,000\n你好\n\n2\n"));
-  assert.strictEqual(tu.parseSrt(tu.formatSrt(out)).length, 3);
-  assert.deepStrictEqual(tu.cleanCues([{ start: "00:00:00,000", end: "00:00:01,000", text: "  ♪ ♪ " }]).cues, []);
+await atest("startDouyinDownload: lỗi từ bước trích xuất được chuyển nguyên văn cho người dùng", async () => {
+  const { UserFacingError } = dy;
+  const r = await collect(dd.startDouyinDownload(mkReq("best"), { extract: () => ({ promise: Promise.reject(new UserFacingError("Cần đăng nhập Douyin")), cancel() {} }), ffmpeg: () => null }));
+  assert.strictEqual(r.error.message, "Cần đăng nhập Douyin");
 });
+await atest("startDouyinDownload: huỷ → không phát complete/error, gọi cancel của bước trích xuất, không để rác", async () => {
+  let extractCancelled = false, events = 0;
+  const h = dd.startDouyinDownload(mkReq("best"), { extract: () => ({ promise: new Promise(() => {}), cancel() { extractCancelled = true; } }), ffmpeg: () => null });
+  h.emitter.on("complete", () => events++); h.emitter.on("error", () => events++);
+  await new Promise(r => setTimeout(r, 50));
+  h.cancel();
+  await new Promise(r => setTimeout(r, 100));
+  assert.ok(extractCancelled); assert.strictEqual(events, 0);
+});
+srv.close();
+fs.rmSync(tmpd, { recursive: true, force: true });
+
+console.log("srt + whisper (phân tích SRT / tiến trình / cấu hình)");
+const srt = require("../dist-electron/main/core/srt.js");
+const wh  = require("../dist-electron/main/core/whisper.js");
+test("formatTimestamp: HH:MM:SS,mmm, làm tròn, chặn số âm/NaN", () => {
+  assert.strictEqual(srt.formatTimestamp(83450), "00:01:23,450");
+  assert.strictEqual(srt.formatTimestamp(3_723_007), "01:02:03,007");
+  assert.strictEqual(srt.formatTimestamp(-5), "00:00:00,000");
+  assert.strictEqual(srt.formatTimestamp(NaN), "00:00:00,000");
+});
+test("parseSrt: CRLF, BOM, nhiều dòng, dòng chỉ có số trong nội dung, đoạn rỗng", () => {
+  const raw = "\uFEFF1\r\n00:00:00,000 --> 00:00:03,500\r\n 大家好，欢迎收看。\r\n\r\n2\r\n00:00:03,500 --> 00:00:07,000\r\n第一行\r\n2024\r\n第三行\r\n\r\n3\r\n00:01:00,000 --> 00:01:02,000\r\n\r\n\r\n";
+  const segs = srt.parseSrt(raw);
+  assert.strictEqual(segs.length, 3);
+  assert.deepStrictEqual(segs[0], { startMs: 0, endMs: 3500, text: "大家好，欢迎收看。" });
+  assert.strictEqual(segs[1].text, "第一行\n2024\n第三行");   // "2024" không bị nhầm là số thứ tự
+  assert.strictEqual(segs[2].text, "");
+  assert.strictEqual(srt.parseSrt("không phải srt").length, 0);
+});
+test("cleanSegments: bỏ đoạn rỗng / chỉ dấu câu, gọn khoảng trắng, end ≥ start", () => {
+  const out = srt.cleanSegments([
+    { startMs: 0, endMs: 1000, text: "  你好   世界 " }, { startMs: 1000, endMs: 2000, text: " ♪ " }, { startMs: 2000, endMs: 3000, text: "…。" },
+    { startMs: 5000, endMs: 4000, text: "反了" }, { startMs: 6000, endMs: 7000, text: "" },
+  ]);
+  assert.deepStrictEqual(out.map(x => x.text), ["你好 世界", "反了"]);
+  assert.ok(out[1].endMs >= out[1].startMs);
+});
+test("formatSrt ↔ parseSrt: ghi rồi đọc lại ra đúng nội dung; đánh số lại từ 1", () => {
+  const segs = [{ startMs: 1500, endMs: 4000, text: "你好" }, { startMs: 4000, endMs: 3_725_250, text: "第二段\n两行" }];
+  const text = srt.formatSrt(segs);
+  assert.ok(text.startsWith("1\n00:00:01,500 --> 00:00:04,000\n你好\n\n2\n00:00:04,000 --> 01:02:05,250\n第二段\n两行\n"));
+  assert.deepStrictEqual(srt.parseSrt(text), segs);
+  assert.strictEqual(srt.toPlainText(segs), "你好\n第二段 两行");
+});
+test("parseWhisperProgress: lấy % mới nhất, chặn 100, không có thì null", () => {
+  assert.strictEqual(srt.parseWhisperProgress("whisper_print_progress_callback: progress =   5%\nwhisper_print_progress_callback: progress =  42%"), 42);
+  assert.strictEqual(srt.parseWhisperProgress("progress = 200%"), 100);
+  assert.strictEqual(srt.parseWhisperProgress("whisper_print_timings: total time = 10 ms"), null);
+});
+test("parseFfmpegSeconds: Duration và time=", () => {
+  assert.strictEqual(srt.parseFfmpegSeconds("  Duration: 00:01:23.50, start: 0.0", "Duration:"), 83.5);
+  assert.strictEqual(srt.parseFfmpegSeconds("size=1kB time=01:00:10.25 bitrate=", "time="), 3610.25);
+  assert.strictEqual(srt.parseFfmpegSeconds("không có", "time="), null);
+});
+test("danh mục mô hình whisper: id hợp lệ, SHA-1 40 hex, file .bin, URL chỉ trỏ Hugging Face; công cụ ghim SHA-256", () => {
+  assert.deepStrictEqual([...wh.MODEL_IDS].sort(), ["base", "small", "turbo"]);
+  for (const id of wh.MODEL_IDS) {
+    assert.match(wh.WHISPER_MODELS[id].sha1, /^[0-9a-f]{40}$/, id);
+    assert.match(wh.WHISPER_MODELS[id].file, /^ggml-[a-z0-9._-]+\.bin$/, id);
+    const u = new URL(wh.modelUrl(id)); assert.strictEqual(u.protocol, "https:"); assert.strictEqual(u.hostname, "huggingface.co");
+  }
+  assert.match(wh.WHISPER_ZIP.sha256, /^[0-9a-f]{64}$/);
+  assert.ok(wh.WHISPER_ZIP.url.startsWith("https://github.com/ggml-org/whisper.cpp/releases/download/" + wh.WHISPER_TAG + "/"));
+  for (const v of ["small", "base", "turbo"]) assert.ok(wh.isWhisperModelId(v));
+  for (const v of ["", "large", "__proto__", "constructor", "../small", null, 1]) assert.ok(!wh.isWhisperModelId(v), String(v));
+});
+test("buildWhisperArgs: tiếng Trung, SRT, tiến trình, prompt chữ giản thể, mọi đường dẫn tương đối", () => {
+  const a = wh.buildWhisperArgs({ modelRel: "models/ggml-small.bin", wavRel: "jobs/ab12/audio.wav", outBaseRel: "jobs/ab12/transcript", threads: 6 });
+  const at = (f) => a[a.indexOf(f) + 1];
+  assert.strictEqual(at("-l"), "zh"); assert.strictEqual(at("-t"), "6"); assert.strictEqual(at("-m"), "models/ggml-small.bin");
+  assert.strictEqual(at("-f"), "jobs/ab12/audio.wav"); assert.strictEqual(at("-of"), "jobs/ab12/transcript");
+  assert.ok(a.includes("-osrt") && a.includes("-pp") && a.includes("-sns"));
+  assert.strictEqual(at("--prompt"), "以下是普通话的句子。");
+  for (const f of ["-m", "-f", "-of"]) assert.ok(!/^([a-zA-Z]:|[\\/])/.test(at(f)), "đường dẫn phải tương đối: " + f);
+});
+test("explainWhisperExit + pickThreads", () => {
+  assert.match(wh.explainWhisperExit(3221225781, ""), /Visual C\+\+/);
+  assert.match(wh.explainWhisperExit(-1073741515, ""), /Visual C\+\+/);          // cùng mã nhưng dạng có dấu
+  assert.match(wh.explainWhisperExit(3221225501, ""), /CPU/);
+  assert.match(wh.explainWhisperExit(1, "whisper: failed to allocate buffer"), /bộ nhớ/);
+  assert.match(wh.explainWhisperExit(2, "line1\nboom happened"), /mã 2.*boom happened/);
+  assert.deepStrictEqual([1, 2, 4, 8, 16, 64].map(wh.pickThreads), [1, 1, 3, 7, 8, 8]);
+});
+test("fileDigest: SHA-1 và SHA-256 đúng vector chuẩn của 'abc'", async () => {
+  const f = path.join(os.tmpdir(), "digest-" + process.pid + ".txt"); fs.writeFileSync(f, "abc");
+  try {
+    assert.strictEqual(await sec.fileDigest(f, "sha1"), "a9993e364706816aba3e25717850c26c9cd0d89d");
+    assert.strictEqual(await sec.fileDigest(f, "sha256"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  } finally { fs.rmSync(f, { force: true }); }
+});
+
+console.log("whisper-install (tải + kiểm checksum + giải nén, server cục bộ)");
+const inst = require("../dist-electron/main/core/whisper-install.js");
+const { spawnSync } = require("child_process");
+const haveZip = spawnSync("zip", ["-v"]).status === 0 && spawnSync("unzip", ["-v"]).status === 0;
+const crypto2 = require("crypto");
+const sha = (alg, buf) => crypto2.createHash(alg).update(buf).digest("hex");
+const MODEL_BODY = Buffer.alloc(200_000, 3);
+const zipDir = fs.mkdtempSync(path.join(os.tmpdir(), "wzip-"));
+let ZIP_BODY = null;
+if (haveZip) {
+  fs.mkdirSync(path.join(zipDir, "Release"));
+  fs.writeFileSync(path.join(zipDir, "Release", "whisper-cli.exe"), Buffer.concat([Buffer.from("MZ"), Buffer.alloc(1000, 1)]));
+  fs.writeFileSync(path.join(zipDir, "Release", "whisper.dll"), "dll");
+  spawnSync("zip", ["-q", "-r", path.join(zipDir, "tool.zip"), "Release"], { cwd: zipDir });
+  ZIP_BODY = fs.readFileSync(path.join(zipDir, "tool.zip"));
+}
+const srv2 = http.createServer((req, res) => {
+  if (req.url === "/tool.zip" && ZIP_BODY) { res.writeHead(200, { "Content-Type": "application/zip", "Content-Length": ZIP_BODY.length }); res.end(ZIP_BODY); }
+  else if (req.url === "/model.bin") { res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": MODEL_BODY.length }); res.end(MODEL_BODY); }
+  else if (req.url === "/go-evil") { res.writeHead(302, { Location: "http://localhost:" + srv2.address().port + "/model.bin" }); res.end(); }
+  else if (req.url === "/slowmodel") { res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": MODEL_BODY.length }); res.write(MODEL_BODY.subarray(0, 1000)); }
+  else { res.writeHead(404); res.end(); }
+});
+await new Promise(r => srv2.listen(0, "127.0.0.1", r));
+const b2 = `http://127.0.0.1:${srv2.address().port}`;
+const wbase = fs.mkdtempSync(path.join(os.tmpdir(), "wbase-"));
+const opts = (extra = {}) => ({ signal: new AbortController().signal, onProgress() {}, allowPrivate: true, ...extra });
+const anyHost = () => true;
+
+if (haveZip) {
+  await atest("ensureWhisperTool: sai SHA-256 → từ chối, không cài, không để rác", async () => {
+    await assert.rejects(() => inst.ensureWhisperTool(wbase, opts(), { zipUrl: b2 + "/tool.zip", zipSha256: "0".repeat(64), allowHost: anyHost }), /SHA-256/);
+    assert.ok(!inst.isToolInstalled(wbase));
+    assert.deepStrictEqual(fs.readdirSync(path.join(wbase, "bin")), []);
+  });
+  await atest("ensureWhisperTool: đúng SHA-256 → giải nén, có whisper-cli.exe + DLL, báo tiến trình; lần sau dùng lại không tải", async () => {
+    const seen = [];
+    const exe = await inst.ensureWhisperTool(wbase, opts({ onProgress: (p, m) => seen.push(m) }), { zipUrl: b2 + "/tool.zip", zipSha256: sha("sha256", ZIP_BODY), allowHost: anyHost });
+    assert.ok(fs.existsSync(exe) && exe.endsWith("whisper-cli.exe") && inst.isToolInstalled(wbase));
+    assert.ok(fs.existsSync(path.join(path.dirname(exe), "whisper.dll")));
+    assert.ok(seen.some(m => /Đang tải công cụ/.test(m)) && seen.some(m => /giải nén/.test(m)));
+    const before = fs.statSync(exe).mtimeMs;
+    assert.strictEqual(await inst.ensureWhisperTool(wbase, opts({ signal: AbortSignal.abort() })), exe);   // không tải lại (nếu tải sẽ bị huỷ ngay)
+    assert.strictEqual(fs.statSync(exe).mtimeMs, before);
+  });
+} else { console.log("  (bỏ qua test giải nén: máy không có zip/unzip)"); }
+await atest("ensureModel: sai SHA-1 → từ chối, xoá file dở; đúng SHA-1 → cài vào models/", async () => {
+  await assert.rejects(() => inst.ensureModel(wbase, "base", opts(), { url: b2 + "/model.bin", sha1: "0".repeat(40), allowHost: anyHost }), /sai mã kiểm tra/);
+  assert.ok(!inst.isModelInstalled(wbase, "base")); assert.deepStrictEqual(fs.readdirSync(path.join(wbase, "models")), []);
+  const p = await inst.ensureModel(wbase, "base", opts(), { url: b2 + "/model.bin", sha1: sha("sha1", MODEL_BODY), allowHost: anyHost });
+  assert.ok(fs.existsSync(p) && fs.statSync(p).size === MODEL_BODY.length && inst.isModelInstalled(wbase, "base"));
+  assert.strictEqual(inst.modelRelPath("base"), "models/ggml-base.bin");
+});
+await atest("ensureModel: danh sách host cho phép được áp dụng cả khi bị chuyển hướng sang host khác", async () => {
+  await assert.rejects(() => inst.ensureModel(wbase, "small", opts(), { url: b2 + "/go-evil", sha1: sha("sha1", MODEL_BODY), allowHost: h => h === "127.0.0.1" }), /danh sách cho phép/);
+  assert.ok(!inst.isModelInstalled(wbase, "small"));
+});
+await atest("ensureModel: mặc định chỉ cho phép huggingface.co (host lạ bị chặn)", async () => {
+  await assert.rejects(() => inst.ensureModel(wbase, "small", opts(), { url: b2 + "/model.bin", sha1: sha("sha1", MODEL_BODY) }), /danh sách cho phép/);
+});
+await atest("ensureModel: huỷ giữa chừng → reject và không để file .part", async () => {
+  const ac = new AbortController(); setTimeout(() => ac.abort(), 150);
+  await assert.rejects(() => inst.ensureModel(wbase, "turbo", opts({ signal: ac.signal }), { url: b2 + "/slowmodel", sha1: sha("sha1", MODEL_BODY), allowHost: anyHost }), /cancelled/);
+  assert.ok(!inst.isModelInstalled(wbase, "turbo")); assert.ok(!fs.readdirSync(path.join(wbase, "models")).some(f => f.endsWith(".part")));
+});
+srv2.close();
+fs.rmSync(wbase, { recursive: true, force: true }); fs.rmSync(zipDir, { recursive: true, force: true });
+
+console.log("transcriber (điều phối: ffmpeg → whisper-cli → SRT, dùng chương trình giả lập)");
+const { spawn: nspawn } = require("child_process");
+const tr = require("../dist-electron/main/core/transcriber.js");
+const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-"));
+fs.writeFileSync(path.join(fakeDir, "ffmpeg.js"), `
+const fs=require("fs"); const a=process.argv.slice(2);
+if (process.env.FF_MODE==="nostream") { console.error("Output file #0 does not contain any stream"); process.exit(1); }
+console.error("  Duration: 00:00:10.00, start: 0.000000, bitrate: 128 kb/s");
+console.error("size=N/A time=00:00:05.00 bitrate=N/A speed=10x");
+if (process.env.FF_PACE) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,320);
+fs.writeFileSync(a[a.length-1], Buffer.alloc(4000, 1));
+`);
+fs.writeFileSync(path.join(fakeDir, "whisper.js"), `
+const fs=require("fs"); const a=process.argv.slice(2); const get=f=>a[a.indexOf(f)+1];
+fs.writeFileSync("args.json", JSON.stringify({args:a,cwd:process.cwd(),modelExists:fs.existsSync(get("-m")),wavExists:fs.existsSync(get("-f"))}));
+const mode=process.env.WH_MODE||"ok";
+if (mode==="vcredist") process.exit(3221225781);
+if (mode==="slow") { setInterval(()=>{},1000); return; }
+const nap=()=>{ if(process.env.WH_PACE) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,260); };
+process.stderr.write("whisper_print_progress_callback: progress =  10%\\n"); nap();
+process.stderr.write("whisper_print_progress_callback: progress =  60%\\n"); nap();
+process.stdout.write("[00:00:00.000 --> 00:00:03.000]  x\\n");
+if (mode==="nosrt") process.exit(0);
+const body = mode==="empty" ? "" :
+ "1\\r\\n00:00:00,000 --> 00:00:03,500\\r\\n 大家好，欢迎收看今天的节目。\\r\\n\\r\\n2\\r\\n00:00:03,500 --> 00:00:04,000\\r\\n ♪ \\r\\n\\r\\n3\\r\\n00:00:04,000 --> 00:00:09,250\\r\\n 今天我们来聊一聊人工智能。\\r\\n\\r\\n";
+fs.writeFileSync(get("-of")+".srt", body);
+process.stderr.write("whisper_print_progress_callback: progress = 100%\\n");
+`);
+const fakeSpawn = (cmd, args, o) => nspawn(process.execPath, [path.join(fakeDir, cmd === "fake-ffmpeg" ? "ffmpeg.js" : "whisper.js"), ...args], o);
+const mkBase = () => { const d = path.join(os.tmpdir(), "基础 目录 " + process.pid + "-" + Math.random().toString(36).slice(2, 6)); fs.mkdirSync(path.join(d, "models"), { recursive: true }); fs.writeFileSync(path.join(d, "models", "ggml-small.bin"), "m"); return d; };
+const mkDeps = (baseDir, env = {}, over = {}) => ({
+  baseDir, threads: 3, spawn: fakeSpawn, env: { ...process.env, ...env },
+  ensureTools: async (onP) => { onP(100, "tools ok"); return "fake-whisper"; },
+  ensureModel: async (m, onP) => { onP(100, "model ok"); return "models/ggml-small.bin"; },
+  ffmpeg: () => "fake-ffmpeg", ...over,
+});
+const runT = (deps, id = "abcd1234") => new Promise(resolve => {
+  const h = tr.startTranscription({ id, inputPath: path.join(deps.baseDir, "in.mp4"), model: "small" }, deps);
+  const progress = [];
+  h.emitter.on("progress", p => progress.push(p));
+  h.emitter.on("done", d => resolve({ done: d, progress, h }));
+  h.emitter.on("error", e => resolve({ error: e, progress, h }));
+});
+const tick = (ms) => new Promise(r => setTimeout(r, ms));
+
+await atest("transcriber: luồng đầy đủ → các đoạn đã làm sạch, tiến trình theo giai đoạn, thư mục tạm được dọn", async () => {
+  const base = mkBase();
+  try {
+    const r = await runT(mkDeps(base, { WH_PACE: "1", FF_PACE: "1" }));
+    assert.ok(r.done, JSON.stringify(r.error));
+    assert.deepStrictEqual(r.done.segments, [
+      { startMs: 0, endMs: 3500, text: "大家好，欢迎收看今天的节目。" },
+      { startMs: 4000, endMs: 9250, text: "今天我们来聊一聊人工智能。" },       // đoạn "♪" đã bị loại
+    ]);
+    const stages = [...new Set(r.progress.map(p => p.stage))];
+    assert.deepStrictEqual(stages, ["tools", "model", "audio", "recognize"]);
+    const rec = r.progress.filter(p => p.stage === "recognize").map(p => p.percent);
+    assert.deepStrictEqual(rec, [0, 10, 60, 100]);   // 10% đến sát sau 0% → được giữ lại và phát sau khoảng nghỉ, không bị mất
+    assert.ok(r.progress.some(p => p.stage === "audio" && p.percent === 50));         // time=5s / Duration=10s
+    await tick(100);
+    assert.deepStrictEqual(fs.readdirSync(path.join(base, "jobs")), []);               // jobs/<id> đã bị xoá
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+await atest("transcriber: whisper-cli nhận đúng tham số, chỉ đường dẫn tương đối, chạy với cwd = thư mục gốc (kể cả khi chứa chữ Trung/dấu cách)", async () => {
+  const base = mkBase();
+  try {
+    let argsFile = null;
+    const spy = (cmd, args, o) => { if (cmd !== "fake-ffmpeg") argsFile = path.join(o.cwd, "args.json"); return fakeSpawn(cmd, args, o); };
+    const r = await runT(mkDeps(base, {}, { spawn: spy }));
+    assert.ok(r.done, JSON.stringify(r.error));
+    const got = JSON.parse(fs.readFileSync(argsFile, "utf8"));
+    assert.strictEqual(got.cwd, base);
+    assert.ok(got.modelExists && got.wavExists, "model và wav phải mở được bằng đường dẫn tương đối");
+    const at = f => got.args[got.args.indexOf(f) + 1];
+    assert.strictEqual(at("-m"), "models/ggml-small.bin"); assert.strictEqual(at("-f"), "jobs/abcd1234/audio.wav");
+    assert.strictEqual(at("-of"), "jobs/abcd1234/transcript"); assert.strictEqual(at("-l"), "zh"); assert.strictEqual(at("-t"), "3");
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+await atest("transcriber: lỗi thân thiện — không có tiếng, thiếu VC++ runtime, kết quả rỗng, whisper không ghi SRT, thiếu ffmpeg, id xấu", async () => {
+  const base = mkBase();
+  try {
+    assert.match((await runT(mkDeps(base, { FF_MODE: "nostream" }))).error.message, /không có âm thanh/);
+    // Mã 0xC0000135 chỉ tồn tại trên Windows (Linux cắt exit code còn 8 bit); phần ánh xạ mã đã có test riêng ở trên
+    const vc = (await runT(mkDeps(base, { WH_MODE: "vcredist" }))).error.message;
+    if (process.platform === "win32") assert.match(vc, /Visual C\+\+/); else assert.match(vc, /Công cụ nhận diện bị lỗi \(mã \d+\)/);
+    assert.match((await runT(mkDeps(base, { WH_MODE: "empty" }))).error.message, /Không nhận diện được lời nói/);
+    assert.match((await runT(mkDeps(base, { WH_MODE: "nosrt" }))).error.message, /không tạo ra file kết quả/);
+    assert.match((await runT(mkDeps(base, {}, { ffmpeg: () => null }))).error.message, /ffmpeg/);
+    assert.match((await runT(mkDeps(base), "../evil")).error.message, /không hợp lệ/);
+    await tick(100);
+    assert.deepStrictEqual(fs.readdirSync(path.join(base, "jobs")), []);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+await atest("transcriber: lỗi cài công cụ/mô hình được chuyển nguyên văn; lỗi lạ được bọc tiền tố", async () => {
+  const base = mkBase();
+  try {
+    const { UserFacingError } = require("../dist-electron/main/core/douyin.js");
+    assert.strictEqual((await runT(mkDeps(base, {}, { ensureModel: async () => { throw new UserFacingError("Mô hình hỏng"); } }))).error.message, "Mô hình hỏng");
+    assert.match((await runT(mkDeps(base, {}, { ensureTools: async () => { throw new Error("boom"); } }))).error.message, /Không trích xuất được văn bản: boom/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+await atest("transcriber: huỷ khi whisper đang chạy → kill tiến trình, không phát done/error, dọn thư mục tạm", async () => {
+  const base = mkBase();
+  try {
+    let whisperChild = null, events = 0;
+    const spy = (cmd, args, o) => { const c = fakeSpawn(cmd, args, o); if (cmd !== "fake-ffmpeg") whisperChild = c; return c; };
+    const h = tr.startTranscription({ id: "cancel01", inputPath: path.join(base, "in.mp4"), model: "small" }, mkDeps(base, { WH_MODE: "slow" }, { spawn: spy }));
+    h.emitter.on("done", () => events++); h.emitter.on("error", () => events++);
+    for (let i = 0; i < 100 && !whisperChild; i++) await tick(50);
+    assert.ok(whisperChild, "whisper phải đã được khởi chạy");
+    const exited = new Promise(r => whisperChild.on("exit", r));
+    h.cancel();
+    await Promise.race([exited, tick(3000).then(() => { throw new Error("whisper không bị kill"); })]);
+    await tick(150);
+    assert.strictEqual(events, 0);
+    assert.deepStrictEqual(fs.readdirSync(path.join(base, "jobs")), []);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+fs.rmSync(fakeDir, { recursive: true, force: true });
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -5,7 +5,7 @@ import { registerDownloadHandlers }     from "./ipc/download.js";
 import { registerUpdaterHandlers }      from "./ipc/updater.js";
 import { registerYtdlpUpdaterHandlers } from "./ipc/ytdlp-update.js";
 import { registerCookiesHandlers }      from "./ipc/cookies.js";
-import { registerTranscribeHandlers }   from "./ipc/transcribe.js";
+import { registerTranscribeHandlers, cancelActiveTranscription } from "./ipc/transcribe.js";
 import { logger } from "./core/logger.js";
 import { isTrustedSender, DEV_ORIGIN } from "./ipc/guard.js";
 
@@ -146,6 +146,8 @@ if (!gotSingleLock) {
     });
   });
 }
+
+app.on("before-quit", () => cancelActiveTranscription());
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

@@ -1,79 +1,149 @@
-// src/main/ipc/cookies.ts — nhập / xoá cookie Douyin ngay trong app (người dùng exe không có đường dẫn để tự lưu file).
-import { ipcMain, dialog, BrowserWindow } from "electron";
+// src/main/ipc/cookies.ts
+// Quản lý cookies.txt do người dùng cung cấp. Nội dung cookie KHÔNG bao giờ được gửi ngược về renderer
+// hay ghi vào log — chỉ trả số lượng + tên miền.
+import { ipcMain, BrowserWindow, dialog } from "electron";
 import fs from "fs";
-import path from "path";
-import { getCookiesPath } from "../core/downloader.js";
+import { IPC, CookiesResult, CookiesStatus } from "../../shared/ipc-types.js";
+import { getCookiesPath, getCookieBrowser, setCookieBrowser, setCookieUserAgent, clearCookieUserAgent } from "../core/downloader.js";
 import {
-  sanitizeDouyinCookies, summarizeCookieFile, MAX_COOKIE_INPUT_BYTES, CookieError,
+  parseCookiesText, isCookieBrowser, isCookieSite, toNetscapeLines, mergeCookieText,
+  COOKIE_SITES, MAX_COOKIES_BYTES,
 } from "../core/cookies.js";
-import { isTrustedSender } from "./guard.js";
+import { runCookieLogin, clearLoginSession } from "../core/cookie-login.js";
 import { logger } from "../core/logger.js";
+import { isTrustedSender } from "./guard.js";
 
-export interface CookiesStatus { exists: boolean; count: number; hasSvWebId: boolean; updatedAt: number | null; }
-export interface CookiesImportResult { ok: boolean; message: string; status: CookiesStatus; canceled?: boolean; }
-
-const ERR_VI: Record<CookieError, string> = {
-  "empty":             "Nội dung trống.",
-  "too-large":         "Dữ liệu quá lớn (tối đa 1MB).",
-  "no-douyin-cookies": "Không tìm thấy cookie của douyin.com. Hãy xuất cookie khi đang mở trang douyin.com.",
-};
+const MAX_DOMAINS_SHOWN = 8;
 
 function readStatus(): CookiesStatus {
+  const file = getCookiesPath();
+  const browser = getCookieBrowser();
+  const empty: CookiesStatus = { browser, exists: false, count: 0, domains: [], totalDomains: 0, updatedAt: null };
   try {
-    const p = getCookiesPath();
-    const st = fs.statSync(p);
-    return { exists: true, ...summarizeCookieFile(fs.readFileSync(p, "utf8")), updatedAt: st.mtimeMs };
+    const stat = fs.statSync(file);
+    if (!stat.isFile() || stat.size > MAX_COOKIES_BYTES) return empty;
+    const parsed = parseCookiesText(fs.readFileSync(file, "utf8"));
+    if (!parsed.ok) return empty;
+    return {
+      browser,
+      exists: true,
+      count: parsed.summary.count,
+      domains: parsed.summary.domains.slice(0, MAX_DOMAINS_SHOWN),
+      totalDomains: parsed.summary.domains.length,
+      updatedAt: stat.mtimeMs,
+    };
   } catch {
-    return { exists: false, count: 0, hasSvWebId: false, updatedAt: null };
+    return empty;
   }
 }
 
-function save(input: unknown): CookiesImportResult {
-  const r = sanitizeDouyinCookies(input);
-  if (!r.ok) return { ok: false, message: ERR_VI[r.error], status: readStatus() };
-  const dest = getCookiesPath();
-  const tmp  = `${dest}.${process.pid}.tmp`;
+/** Ghi nguyên tử (file tạm → rename) và giới hạn quyền đọc ở chủ sở hữu. */
+function saveCookies(raw: unknown): CookiesResult {
+  const parsed = parseCookiesText(raw);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+
+  const file = getCookiesPath();
+  const tmp = `${file}.tmp`;
   try {
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(tmp, r.result.content, { encoding: "utf8", mode: 0o600 });
-    fs.renameSync(tmp, dest);
-  } catch (e) {
+    fs.writeFileSync(tmp, parsed.text, { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } catch (err) {
     try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
-    logger.error("cookies", "Không ghi được cookies", e);
-    return { ok: false, message: "Không lưu được cookie vào thư mục dữ liệu của app.", status: readStatus() };
+    logger.error("ipc:cookies", "Không ghi được cookies.txt", err);
+    return { ok: false, error: "Không lưu được cookies. Hãy thử lại." };
   }
-  const extra = r.result.skipped ? ` (bỏ qua ${r.result.skipped} dòng không phải Douyin/sai định dạng)` : "";
-  const warn  = r.result.hasSvWebId ? "" : " Lưu ý: chưa thấy cookie s_v_web_id — nếu vẫn lỗi, hãy xuất lại cookie sau khi mở một video trên douyin.com.";
-  return { ok: true, message: `Đã lưu ${r.result.count} cookie Douyin${extra}.${warn}`, status: readStatus() };
+  logger.info("ipc:cookies", "Đã lưu cookies", { count: parsed.summary.count, domains: parsed.summary.domains.length });
+  return { ok: true, status: readStatus() };
 }
 
 export function registerCookiesHandlers(win: BrowserWindow) {
-  ipcMain.handle("cookies:status", (evt) =>
-    isTrustedSender(evt, win, "cookies:status") ? readStatus() : null);
+  ipcMain.handle(IPC.COOKIES_STATUS, (evt): CookiesStatus | null =>
+    isTrustedSender(evt, win, IPC.COOKIES_STATUS) ? readStatus() : null);
 
-  ipcMain.handle("cookies:importFile", async (evt): Promise<CookiesImportResult | null> => {
-    if (!isTrustedSender(evt, win, "cookies:importFile")) return null;
+  ipcMain.handle(IPC.COOKIES_SAVE, (evt, text: unknown): CookiesResult => {
+    if (!isTrustedSender(evt, win, IPC.COOKIES_SAVE)) return { ok: false, error: "Yêu cầu bị từ chối." };
+    return saveCookies(text);
+  });
+
+  ipcMain.handle(IPC.COOKIES_IMPORT, async (evt): Promise<CookiesResult> => {
+    if (!isTrustedSender(evt, win, IPC.COOKIES_IMPORT)) return { ok: false, error: "Yêu cầu bị từ chối." };
     const r = await dialog.showOpenDialog(win, {
       title: "Chọn file cookies.txt",
       properties: ["openFile"],
-      filters: [{ name: "Cookies", extensions: ["txt", "cookies"] }, { name: "Tất cả", extensions: ["*"] }],
+      filters: [{ name: "cookies.txt", extensions: ["txt"] }, { name: "Tất cả file", extensions: ["*"] }],
     });
-    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true, message: "", status: readStatus() };
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
     try {
-      const f = r.filePaths[0];
-      if (fs.statSync(f).size > MAX_COOKIE_INPUT_BYTES) return { ok: false, message: ERR_VI["too-large"], status: readStatus() };
-      return save(fs.readFileSync(f, "utf8"));
-    } catch {
-      return { ok: false, message: "Không đọc được file đã chọn.", status: readStatus() };
+      const stat = fs.statSync(r.filePaths[0]);
+      if (!stat.isFile()) return { ok: false, error: "Đường dẫn đã chọn không phải là file." };
+      if (stat.size > MAX_COOKIES_BYTES) return { ok: false, error: "File quá lớn (tối đa 2 MB)." };
+      return saveCookies(fs.readFileSync(r.filePaths[0], "utf8"));
+    } catch (err) {
+      logger.warn("ipc:cookies", "Không đọc được file đã chọn", { err });
+      return { ok: false, error: "Không đọc được file đã chọn." };
     }
   });
 
-  ipcMain.handle("cookies:importText", (evt, text: unknown): CookiesImportResult | null =>
-    isTrustedSender(evt, win, "cookies:importText") ? save(text) : null);
+  ipcMain.handle(IPC.COOKIES_SET_BROWSER, (evt, browser: unknown): CookiesResult => {
+    if (!isTrustedSender(evt, win, IPC.COOKIES_SET_BROWSER)) return { ok: false, error: "Yêu cầu bị từ chối." };
+    if (!isCookieBrowser(browser)) return { ok: false, error: "Trình duyệt không hợp lệ." };
+    try {
+      setCookieBrowser(browser);
+      logger.info("ipc:cookies", "Đã đổi nguồn cookies trình duyệt", { browser });
+      return { ok: true, status: readStatus() };
+    } catch (err) {
+      logger.error("ipc:cookies", "Không lưu được lựa chọn trình duyệt", err);
+      return { ok: false, error: "Không lưu được lựa chọn. Hãy thử lại." };
+    }
+  });
 
-  ipcMain.handle("cookies:clear", (evt): CookiesStatus | null => {
-    if (!isTrustedSender(evt, win, "cookies:clear")) return null;
-    try { fs.rmSync(getCookiesPath(), { force: true }); } catch (e) { logger.warn("cookies", "Không xoá được cookies", { e }); }
-    return readStatus();
+  // Tự lấy cookies: mở cửa sổ đăng nhập → đọc cookies của phiên → gộp vào cookies.txt
+  ipcMain.handle(IPC.COOKIES_LOGIN, async (evt, site: unknown): Promise<CookiesResult> => {
+    if (!isTrustedSender(evt, win, IPC.COOKIES_LOGIN)) return { ok: false, error: "Yêu cầu bị từ chối." };
+    if (!isCookieSite(site)) return { ok: false, error: "Trang không hợp lệ." };
+
+    let outcome;
+    try {
+      outcome = await runCookieLogin(win, site);
+    } catch {
+      return { ok: false, error: "Cửa sổ đăng nhập đang mở. Hãy hoàn tất hoặc đóng nó trước." };
+    }
+
+    const cfg = COOKIE_SITES[site];
+    const lines = toNetscapeLines(outcome.cookies, cfg.domains);
+    if (lines.length === 0) {
+      return { ok: false, error: "Chưa lấy được cookies. Hãy thử lại và chờ trang tải xong trước khi đóng cửa sổ." };
+    }
+
+    let existing: string | null = null;
+    try {
+      const f = getCookiesPath();
+      if (fs.existsSync(f) && fs.statSync(f).size <= MAX_COOKIES_BYTES) existing = fs.readFileSync(f, "utf8");
+    } catch { existing = null; }
+
+    const saved = saveCookies(mergeCookieText(existing, lines, cfg.domains));
+    if (!saved.ok) return saved;
+
+    try {
+      setCookieBrowser("none");                       // cookies vừa lấy là nguồn mới nhất → bỏ lựa chọn trình duyệt cũ
+      setCookieUserAgent(outcome.userAgent);          // yt-dlp dùng đúng UA của cửa sổ đăng nhập cho Douyin/TikTok
+    } catch (err) { logger.warn("ipc:cookies", "Không lưu được cài đặt đi kèm", { err }); }
+
+    logger.info("ipc:cookies", "Đã lấy cookies qua cửa sổ đăng nhập", { site, count: lines.length, loggedIn: outcome.loggedIn });
+    return { ok: true, loggedIn: outcome.loggedIn, count: lines.length, status: readStatus() };
+  });
+
+  ipcMain.handle(IPC.COOKIES_CLEAR, async (evt): Promise<CookiesResult> => {
+    if (!isTrustedSender(evt, win, IPC.COOKIES_CLEAR)) return { ok: false, error: "Yêu cầu bị từ chối." };
+    try {
+      fs.rmSync(getCookiesPath(), { force: true });
+      clearCookieUserAgent();
+      await clearLoginSession();                      // đăng xuất khỏi cửa sổ đăng nhập
+      logger.info("ipc:cookies", "Đã xoá cookies");
+      return { ok: true, status: readStatus() };
+    } catch (err) {
+      logger.error("ipc:cookies", "Không xoá được cookies.txt", err);
+      return { ok: false, error: "Không xoá được file cookies." };
+    }
   });
 }

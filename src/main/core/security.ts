@@ -104,6 +104,17 @@ export function sha256File(file: string): Promise<string> {
       .on("end", () => resolve(h.digest("hex")));
   });
 }
+/** Băm file theo luồng (dùng cho mô hình lớn: SHA-1 do whisper.cpp công bố, SHA-256 cho file nhị phân). */
+export function fileDigest(file: string, algorithm: "sha1" | "sha256"): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const h = crypto.createHash(algorithm);
+    fs.createReadStream(file)
+      .on("error", reject)
+      .on("data", d => h.update(d))
+      .on("end", () => resolve(h.digest("hex")));
+  });
+}
+
 export function looksLikeWindowsExe(file: string): boolean {
   try {
     const fd = fs.openSync(file, "r");
