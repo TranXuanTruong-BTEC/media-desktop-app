@@ -22,7 +22,7 @@ const MAX_TOKENS = 20;
 const MAX_RESULTS = 3;
 
 const pickedFiles = new Map<string, { path: string; name: string }>();
-const results = new Map<string, { segments: TranscribeSegment[]; inputPath: string }>();
+const results = new Map<string, { segments: TranscribeSegment[]; inputPath: string; translated: boolean }>();
 let active: { id: string; cancel: () => void } | null = null;
 
 const baseDir = () => path.join(app.getPath("userData"), "whisper");
@@ -90,10 +90,11 @@ export function registerTranscribeHandlers(win: BrowserWindow) {
 
     const id = r.id;
     const model = r.model;
-    logger.info("ipc:transcribe", "Bắt đầu trích xuất văn bản", { model });
+    const translateToVi = r.translateToVi === true;
+    logger.info("ipc:transcribe", "Bắt đầu trích xuất văn bản", { model, translateToVi });
 
     const installOpts = (signal: AbortSignal, onProgress: (p: number, m: string) => void) => ({ signal, onProgress });
-    const job = startTranscription({ id, inputPath: file.path, model }, {
+    const job = startTranscription({ id, inputPath: file.path, model, translateToVi }, {
       baseDir: baseDir(),
       threads: pickThreads(os.cpus().length),
       ffmpeg: findFfmpeg,
@@ -109,7 +110,7 @@ export function registerTranscribeHandlers(win: BrowserWindow) {
     const end = () => { if (active?.id === id) active = null; setTaskbar(-1); };
     job.emitter.on("progress", (p) => { setTaskbar(p.percent / 100); send(IPC.TRANSCRIBE_PROGRESS, p); });
     job.emitter.on("done", (d) => {
-      remember(results, id, { segments: d.segments, inputPath: file.path }, MAX_RESULTS);
+      remember(results, id, { segments: d.segments, inputPath: file.path, translated: d.translated === true }, MAX_RESULTS);
       end();
       send(IPC.TRANSCRIBE_DONE, d);
     });
@@ -128,7 +129,7 @@ export function registerTranscribeHandlers(win: BrowserWindow) {
     if (!res) return { ok: false, error: "Không còn kết quả để lưu. Hãy trích xuất lại." };
     const r = await dialog.showSaveDialog(win, {
       title: "Lưu file phụ đề",
-      defaultPath: path.join(path.dirname(res.inputPath), "transcript.srt"),
+      defaultPath: path.join(path.dirname(res.inputPath), res.translated ? "transcript-vi.srt" : "transcript.srt"),
       filters: [{ name: "Phụ đề SRT", extensions: ["srt"] }],
     });
     if (r.canceled || !r.filePath) return { ok: false, canceled: true };

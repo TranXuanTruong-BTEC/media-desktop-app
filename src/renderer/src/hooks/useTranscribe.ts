@@ -14,6 +14,9 @@ export interface TranscribeState {
   phase: TranscribePhase;
   progress: TranscribeProgress | null;
   segments: TranscribeSegment[];
+  translated: boolean;
+  warning: string | null;
+  translateToVi: boolean;
   error: string | null;
   notice: string | null;      // thông báo nhỏ (đã lưu / đã sao chép...)
   noticeIsError: boolean;
@@ -27,7 +30,8 @@ function uid() {
 export function useTranscribe() {
   const [state, setState] = useState<TranscribeState>({
     file: null, model: "small", status: null, phase: "idle", progress: null,
-    segments: [], error: null, notice: null, noticeIsError: false,
+    segments: [], translated: false, warning: null, translateToVi: true,
+    error: null, notice: null, noticeIsError: false,
   });
   const jobId = useRef<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,7 +58,10 @@ export function useTranscribe() {
     });
     const offD = window.api.onTranscribeDone(d => {
       if (d.id !== jobId.current) return;
-      setState(s => ({ ...s, phase: "done", segments: d.segments, progress: null, error: null }));
+      setState(s => ({
+        ...s, phase: "done", segments: d.segments, progress: null, error: null,
+        translated: d.translated === true, warning: d.warning ?? null,
+      }));
       void refreshStatus();
     });
     const offE = window.api.onTranscribeError(e => {
@@ -71,10 +78,14 @@ export function useTranscribe() {
     if (r.canceled) return;
     if (!r.ok || !r.file) { showNotice(r.error ?? "Không chọn được file.", true); return; }
     jobId.current = null;
-    setState(s => ({ ...s, file: r.file!, phase: "idle", segments: [], error: null, progress: null }));
+    setState(s => ({
+      ...s, file: r.file!, phase: "idle", segments: [], error: null, progress: null,
+      translated: false, warning: null,
+    }));
   }, [state.phase, showNotice]);
 
   const setModel = useCallback((model: WhisperModelId) => patch({ model }), [patch]);
+  const setTranslateToVi = useCallback((translateToVi: boolean) => patch({ translateToVi }), [patch]);
 
   const start = useCallback(async () => {
     if (!state.file || state.phase === "running") return;
@@ -82,14 +93,17 @@ export function useTranscribe() {
     jobId.current = id;
     setState(s => ({
       ...s, phase: "running", segments: [], error: null, notice: null,
+      translated: false, warning: null,
       progress: { id, stage: "tools", percent: 0, message: "Đang chuẩn bị..." },
     }));
-    const r = await window.api.startTranscribe({ id, fileToken: state.file.token, model: state.model });
+    const r = await window.api.startTranscribe({
+      id, fileToken: state.file.token, model: state.model, translateToVi: state.translateToVi,
+    });
     if (!r.ok) {
       jobId.current = null;
       setState(s => ({ ...s, phase: "error", error: r.error ?? "Không bắt đầu được.", progress: null }));
     }
-  }, [state.file, state.model, state.phase]);
+  }, [state.file, state.model, state.phase, state.translateToVi]);
 
   const cancel = useCallback(() => {
     if (jobId.current) window.api.cancelTranscribe(jobId.current);
@@ -113,7 +127,7 @@ export function useTranscribe() {
     else showNotice(r.error ?? "Không sao chép được.", true);
   }, [showNotice]);
 
-  return { state, pickFile, setModel, start, cancel, saveSrt, copyText };
+  return { state, pickFile, setModel, setTranslateToVi, start, cancel, saveSrt, copyText };
 }
 
 export type TranscribeApi = ReturnType<typeof useTranscribe>;

@@ -1,5 +1,6 @@
 // src/main/core/transcriber.ts
-// Trích xuất văn bản từ file âm thanh/video: ffmpeg → WAV 16 kHz mono → whisper-cli (tiếng Trung) → SRT → các đoạn.
+// Trích xuất văn bản từ file âm thanh/video: ffmpeg → WAV → whisper-cli (tiếng Trung) → SRT;
+// tuỳ chọn: nhận diện cắt cảnh rồi dịch khối lời thoại sang tiếng Việt.
 // Không import electron/logger: mọi phụ thuộc (đường dẫn, cài đặt công cụ, ffmpeg) được truyền qua `deps` để test được.
 import { EventEmitter } from "events";
 import fs from "fs";
@@ -10,6 +11,8 @@ import { UserFacingError } from "./douyin.js";
 import { parseSrt, cleanSegments, parseWhisperProgress, parseFfmpegSeconds } from "./srt.js";
 import { buildWhisperArgs, explainWhisperExit } from "./whisper.js";
 import { isValidId } from "./security.js";
+import { attachSceneIndex, batchesForTranslation, parseSceneCutMs, uniqueCuts } from "./scenes.js";
+import { translateZhToVi, type GetJsonFn } from "./translate.js";
 
 export interface TranscribeEvents {
   progress: (p: TranscribeProgress) => void;
@@ -34,9 +37,16 @@ export interface TranscribeDeps {
   spawn?: SpawnFn;
   env?: NodeJS.ProcessEnv;
   log?(message: string, extra?: unknown): void;
+  /** Thay HTTP dịch (test). Mặc định gọi máy chủ dịch công cộng. */
+  getJson?: GetJsonFn;
 }
 
-export interface TranscribeJob { id: string; inputPath: string; model: WhisperModelId; }
+export interface TranscribeJob {
+  id: string;
+  inputPath: string;
+  model: WhisperModelId;
+  translateToVi?: boolean;
+}
 
 const tail = (s: string, n = 2000) => (s.length > n ? s.slice(-n) : s);
 
@@ -166,13 +176,55 @@ export function startTranscription(job: TranscribeJob, deps: TranscribeDeps): { 
       // 4) đọc SRT do whisper ghi
       const srtPath = path.join(jobDir, "transcript.srt");
       if (!fs.existsSync(srtPath)) throw new UserFacingError("Công cụ nhận diện không tạo ra file kết quả.");
-      const segments: TranscribeSegment[] = cleanSegments(parseSrt(fs.readFileSync(srtPath, "utf8")));
+      let segments: TranscribeSegment[] = cleanSegments(parseSrt(fs.readFileSync(srtPath, "utf8")));
       if (segments.length === 0) {
         throw new UserFacingError("Không nhận diện được lời nói nào trong file (có thể chỉ có nhạc/tiếng ồn, âm lượng quá nhỏ hoặc không phải tiếng Trung).");
       }
       progress("recognize", 100, "Hoàn tất", true);
+
+      let translated = false;
+      let warning: string | undefined;
+
+      if (job.translateToVi) {
+        progress("scenes", 0, "Đang nhận diện cảnh trong video...", true);
+        const cuts = await detectSceneCuts({
+          ffmpeg, inputPath: job.inputPath, spawn: doSpawn, env: deps.env, signal: ac.signal,
+          setChild: (c) => { child = c; },
+        });
+        if (cancelled) return;
+        segments = attachSceneIndex(segments, cuts);
+        const sceneCount = 1 + Math.max(0, ...segments.map(s => s.sceneIndex ?? 0));
+        progress("scenes", 100, cuts.length > 0
+          ? `Đã tách ${sceneCount} cảnh hình`
+          : `Không thấy cắt cảnh — gom ${sceneCount} đoạn hội thoại`, true);
+
+        progress("translate", 0, "Đang dịch sang tiếng Việt theo cảnh...", true);
+        const batches = batchesForTranslation(segments);
+        const total = Math.max(1, batches.length);
+        let doneBatches = 0;
+        try {
+          for (const batch of batches) {
+            if (cancelled) return;
+            const vi = await translateZhToVi(batch.map(s => s.text), ac.signal, deps.getJson);
+            for (let i = 0; i < batch.length; i++) {
+              if (!batch[i].sourceText) batch[i].sourceText = batch[i].text;
+              if (vi[i]) batch[i].text = vi[i];
+            }
+            doneBatches++;
+            progress("translate", (doneBatches / total) * 100, `Đang dịch cảnh ${doneBatches}/${total} sang tiếng Việt...`);
+          }
+          translated = true;
+          progress("translate", 100, "Đã dịch sang tiếng Việt", true);
+        } catch (err) {
+          if (cancelled || ac.signal.aborted) return;
+          const e = err as Error;
+          warning = e instanceof UserFacingError ? e.message : `Không dịch được sang tiếng Việt: ${e.message}`;
+          deps.log?.("Dịch phụ đề thất bại — giữ lời gốc", { err: e.message });
+        }
+      }
+
       stopPending();
-      emitter.emit("done", { id: job.id, segments });
+      emitter.emit("done", { id: job.id, segments, translated, warning });
     } catch (err) {
       stopPending();
       if (cancelled) return;
@@ -188,4 +240,48 @@ export function startTranscription(job: TranscribeJob, deps: TranscribeDeps): { 
   })();
 
   return { emitter, cancel };
+}
+
+function detectSceneCuts(o: {
+  ffmpeg: string;
+  inputPath: string;
+  spawn: SpawnFn;
+  env?: NodeJS.ProcessEnv;
+  signal: AbortSignal;
+  setChild: (c: ChildProcess | null) => void;
+}): Promise<number[]> {
+  return new Promise((resolve) => {
+    if (o.signal.aborted) return resolve([]);
+    const args = [
+      "-y", "-hide_banner", "-nostdin", "-i", o.inputPath,
+      "-an", "-map", "0:v:0",
+      "-vf", "select=gt(scene,0.32),showinfo",
+      "-f", "null", "-",
+    ];
+    const c = o.spawn(o.ffmpeg, args, { windowsHide: true, env: o.env });
+    o.setChild(c);
+    const found: number[] = [];
+    let buf = "";
+    const onAbort = () => { try { c.kill(); } catch { /* ignore */ } };
+    o.signal.addEventListener("abort", onAbort);
+    c.stderr?.setEncoding("utf8");
+    c.stderr?.on("data", (d: string) => {
+      buf += d;
+      const nl = buf.lastIndexOf("\n");
+      if (nl < 0) return;
+      found.push(...parseSceneCutMs(buf.slice(0, nl)));
+      buf = buf.slice(nl + 1);
+    });
+    const finish = (cuts: number[]) => {
+      o.signal.removeEventListener("abort", onAbort);
+      o.setChild(null);
+      resolve(cuts);
+    };
+    c.on("error", () => finish([]));
+    c.on("close", (code) => {
+      if (o.signal.aborted || code !== 0) return finish([]);
+      found.push(...parseSceneCutMs(buf));
+      finish(uniqueCuts(found));
+    });
+  });
 }

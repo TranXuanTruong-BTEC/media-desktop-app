@@ -441,6 +441,64 @@ test("parseFfmpegSeconds: Duration và time=", () => {
   assert.strictEqual(srt.parseFfmpegSeconds("size=1kB time=01:00:10.25 bitrate=", "time="), 3610.25);
   assert.strictEqual(srt.parseFfmpegSeconds("không có", "time="), null);
 });
+
+console.log("scenes + translate (gom cảnh / đóng gói dòng dịch)");
+const scenes = require("../dist-electron/main/core/scenes.js");
+const trn = require("../dist-electron/main/core/translate.js");
+test("parseSceneCutMs: pts_time, bỏ cắt quá sớm, gộp cắt sát nhau", () => {
+  const stderr = "[Parsed_showinfo_1] n:0 pts_time:0.080 foo\n[Parsed_showinfo_1] n:1 pts_time:3.250\n[Parsed_showinfo_1] n:2 pts_time:3.400\n[Parsed_showinfo_1] n:3 pts_time:12.000\n";
+  assert.deepStrictEqual(scenes.parseSceneCutMs(stderr), [3250, 12000]);
+  assert.deepStrictEqual(scenes.parseSceneCutMs("rác"), []);
+});
+test("attachSceneIndex: cắt hình chia cảnh; không cắt thì gom theo khoảng lặng", () => {
+  const segs = [
+    { startMs: 0, endMs: 3000, text: "a" },
+    { startMs: 3100, endMs: 5000, text: "b" },
+    { startMs: 8000, endMs: 9000, text: "c" },
+  ];
+  const vis = scenes.attachSceneIndex(segs, [4000]);
+  assert.deepStrictEqual(vis.map(s => s.sceneIndex), [0, 1, 1]);
+  const pause = scenes.attachSceneIndex(segs, []);
+  assert.deepStrictEqual(pause.map(s => s.sceneIndex), [0, 0, 1]);
+});
+test("batchesForTranslation: không trộn hai cảnh; tách khi quá dài", () => {
+  const segs = scenes.attachSceneIndex([
+    { startMs: 0, endMs: 1000, text: "一" },
+    { startMs: 1100, endMs: 2000, text: "二" },
+    { startMs: 5000, endMs: 6000, text: "三" },
+  ], []);
+  const batches = scenes.batchesForTranslation(segs);
+  assert.strictEqual(batches.length, 2);
+  assert.deepStrictEqual(batches[0].map(s => s.text), ["一", "二"]);
+  assert.deepStrictEqual(batches[1].map(s => s.text), ["三"]);
+});
+test("pack/unpack numbered + parseGtx/MyMemory", () => {
+  const packed = trn.packNumbered(["你好", "世界"]);
+  assert.strictEqual(packed, "1. 你好\n2. 世界");
+  assert.deepStrictEqual(trn.unpackNumbered("1. Xin chào\n2) Thế giới", 2), ["Xin chào", "Thế giới"]);
+  assert.strictEqual(trn.unpackNumbered("1. chỉ một", 2), null);
+  assert.strictEqual(trn.parseGtxResponse([[["Xin ", "你好"], ["chào", "你"]]]), "Xin chào");
+  assert.strictEqual(trn.parseMyMemoryResponse({ responseStatus: 200, responseData: { translatedText: "  Xin chào  " } }), "Xin chào");
+});
+await atest("httpsGetJson: host không trong danh sách → từ chối, không gọi mạng", async () => {
+  await assert.rejects(() => trn.httpsGetJson("https://evil.example/x", new AbortController().signal), /danh sách cho phép/);
+});
+await atest("translateZhToVi: dịch cả khối đánh số; lệch dòng thì dịch từng câu", async () => {
+  const getJson = async (url) => {
+    const q = new URL(url).searchParams.get("q") ?? "";
+    if (q.includes("你好")) return [[["1. Chào\n2. Thế giới"]]];
+    if (q.includes("单独")) return [[["1. Một mình"]]];
+    return [[["?"]]];
+  };
+  assert.deepStrictEqual(await trn.translateZhToVi(["你好", "世界"], new AbortController().signal, getJson), ["Chào", "Thế giới"]);
+  assert.deepStrictEqual(await trn.translateZhToVi(["单独"], new AbortController().signal, getJson), ["Một mình"]);
+  const bad = async (url) => {
+    const q = new URL(url).searchParams.get("q") ?? "";
+    if (q.includes("\n")) return [[["không khớp số dòng"]]];
+    return [[[`VI-${q}`]]];
+  };
+  assert.deepStrictEqual(await trn.translateZhToVi(["甲", "乙"], new AbortController().signal, bad), ["VI-甲", "VI-乙"]);
+});
 test("danh mục mô hình whisper: id hợp lệ, SHA-1 40 hex, file .bin, URL chỉ trỏ Hugging Face; công cụ ghim SHA-256", () => {
   assert.deepStrictEqual([...wh.MODEL_IDS].sort(), ["base", "small", "turbo"]);
   for (const id of wh.MODEL_IDS) {
@@ -553,6 +611,11 @@ const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-"));
 fs.writeFileSync(path.join(fakeDir, "ffmpeg.js"), `
 const fs=require("fs"); const a=process.argv.slice(2);
 if (process.env.FF_MODE==="nostream") { console.error("Output file #0 does not contain any stream"); process.exit(1); }
+if (!a.includes("-vn")) {
+  if (process.env.FF_SCENE==="none") { console.error("Stream map '0:v:0' matches no streams"); process.exit(1); }
+  console.error("[Parsed_showinfo_1 @ 0] n: 0 pts: 360000 pts_time:4.000 pos:123");
+  process.exit(0);
+}
 console.error("  Duration: 00:00:10.00, start: 0.000000, bitrate: 128 kb/s");
 console.error("size=N/A time=00:00:05.00 bitrate=N/A speed=10x");
 if (process.env.FF_PACE) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,320);
@@ -582,8 +645,8 @@ const mkDeps = (baseDir, env = {}, over = {}) => ({
   ensureModel: async (m, onP) => { onP(100, "model ok"); return "models/ggml-small.bin"; },
   ffmpeg: () => "fake-ffmpeg", ...over,
 });
-const runT = (deps, id = "abcd1234") => new Promise(resolve => {
-  const h = tr.startTranscription({ id, inputPath: path.join(deps.baseDir, "in.mp4"), model: "small" }, deps);
+const runT = (deps, id = "abcd1234", job = {}) => new Promise(resolve => {
+  const h = tr.startTranscription({ id, inputPath: path.join(deps.baseDir, "in.mp4"), model: "small", ...job }, deps);
   const progress = [];
   h.emitter.on("progress", p => progress.push(p));
   h.emitter.on("done", d => resolve({ done: d, progress, h }));
@@ -607,6 +670,39 @@ await atest("transcriber: luồng đầy đủ → các đoạn đã làm sạch
     assert.ok(r.progress.some(p => p.stage === "audio" && p.percent === 50));         // time=5s / Duration=10s
     await tick(100);
     assert.deepStrictEqual(fs.readdirSync(path.join(base, "jobs")), []);               // jobs/<id> đã bị xoá
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+await atest("transcriber: dịch theo cảnh — gắn sceneIndex, text tiếng Việt, giữ sourceText", async () => {
+  const base = mkBase();
+  try {
+    const getJson = async (url) => {
+      const q = new URL(url).searchParams.get("q") ?? "";
+      const lines = q.split(/\n/).map(l => {
+        const m = /^(\d+)\.\s*(.*)$/.exec(l);
+        return m ? `${m[1]}. VI-${m[2]}` : `VI-${l}`;
+      });
+      return [[[lines.join("\n")]]];
+    };
+    const r = await runT(mkDeps(base, {}, { getJson }), "abcd1234", { translateToVi: true });
+    assert.ok(r.done, JSON.stringify(r.error));
+    assert.strictEqual(r.done.translated, true);
+    assert.deepStrictEqual(r.done.segments.map(s => s.sceneIndex), [0, 1]);
+    assert.ok(r.done.segments.every(s => s.text.startsWith("VI-") && s.sourceText && !s.sourceText.startsWith("VI-")));
+    const stages = [...new Set(r.progress.map(p => p.stage))];
+    assert.ok(stages.includes("scenes") && stages.includes("translate"));
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+await atest("transcriber: không có luồng hình + dịch lỗi → cảnh theo khoảng lặng, giữ lời gốc, có warning", async () => {
+  const base = mkBase();
+  try {
+    const r = await runT(mkDeps(base, { FF_SCENE: "none" }, {
+      getJson: async () => { throw new Error("no net"); },
+    }), "abcd1234", { translateToVi: true });
+    assert.ok(r.done, JSON.stringify(r.error));
+    assert.ok(r.done.warning);
+    assert.strictEqual(r.done.translated, false);
+    assert.ok(r.done.segments.every(s => !s.sourceText));
+    assert.strictEqual(r.done.segments[0].text, "大家好，欢迎收看今天的节目。");
   } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });
 await atest("transcriber: whisper-cli nhận đúng tham số, chỉ đường dẫn tương đối, chạy với cwd = thư mục gốc (kể cả khi chứa chữ Trung/dấu cách)", async () => {

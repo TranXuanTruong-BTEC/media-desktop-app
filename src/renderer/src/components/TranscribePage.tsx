@@ -31,23 +31,54 @@ export function fmtTime(ms: number): string {
 }
 
 const STAGE_LABEL: Record<string, string> = {
-  tools: "Chuẩn bị công cụ", model: "Tải mô hình", audio: "Trích âm thanh", recognize: "Nhận diện giọng nói",
+  tools: "Chuẩn bị công cụ", model: "Tải mô hình", audio: "Trích âm thanh",
+  recognize: "Nhận diện giọng nói", scenes: "Nhận diện cảnh", translate: "Dịch theo cảnh",
 };
 
 function SegmentRow({ seg }: { seg: TranscribeSegment }) {
+  const zh = seg.sourceText && seg.sourceText !== seg.text ? seg.sourceText : null;
   return (
     <div className="flex gap-3 py-1.5 border-b border-[#252a38] last:border-0">
       <span className="shrink-0 w-[118px] font-mono text-[11px] text-muted pt-[1px] select-none">
         {fmtTime(seg.startMs)} → {fmtTime(seg.endMs)}
       </span>
-      <span className="text-[13px] text-text leading-relaxed whitespace-pre-wrap break-words select-text">{seg.text}</span>
+      <span className="min-w-0">
+        <span className="block text-[13px] text-text leading-relaxed whitespace-pre-wrap break-words select-text">{seg.text}</span>
+        {zh && (
+          <span className="block text-[11px] text-muted mt-0.5 leading-relaxed whitespace-pre-wrap break-words select-text">{zh}</span>
+        )}
+      </span>
     </div>
   );
 }
 
+function SceneBlock({ index, segs }: { index: number; segs: TranscribeSegment[] }) {
+  const start = segs[0]?.startMs ?? 0;
+  const end = segs[segs.length - 1]?.endMs ?? 0;
+  return (
+    <div className="border-b border-[#252a38] last:border-0 pb-2 mb-1 last:mb-0 last:pb-0">
+      <div className="sticky top-0 z-[1] bg-[#0f1117] py-1.5 text-[11px] font-medium text-accent/90">
+        Cảnh {index + 1} · {fmtTime(start)} → {fmtTime(end)}
+      </div>
+      {segs.map((s, i) => <SegmentRow key={i} seg={s} />)}
+    </div>
+  );
+}
+
+function groupScenes(segments: TranscribeSegment[]): { index: number; segs: TranscribeSegment[] }[] {
+  const out: { index: number; segs: TranscribeSegment[] }[] = [];
+  for (const s of segments) {
+    const idx = s.sceneIndex ?? 0;
+    const last = out[out.length - 1];
+    if (!last || last.index !== idx) out.push({ index: idx, segs: [s] });
+    else last.segs.push(s);
+  }
+  return out;
+}
+
 export function TranscribePage({ api }: { api: TranscribeApi }) {
-  const { state, pickFile, setModel, start, cancel, saveSrt, copyText } = api;
-  const { file, model, status, phase, progress, segments, error, notice, noticeIsError } = state;
+  const { state, pickFile, setModel, setTranslateToVi, start, cancel, saveSrt, copyText } = api;
+  const { file, model, status, phase, progress, segments, translated, warning, translateToVi, error, notice, noticeIsError } = state;
   const running = phase === "running";
   const selected = status?.models.find(m => m.id === model);
   const needsDownload = !!status && (!status.toolsInstalled || !selected?.installed);
@@ -58,8 +89,8 @@ export function TranscribePage({ api }: { api: TranscribeApi }) {
       <div>
         <h1 className="text-[15px] font-semibold text-text">Trích xuất văn bản</h1>
         <p className="text-[12px] text-subtle mt-0.5">
-          Nhận diện giọng nói tiếng Trung trong file âm thanh/video thành văn bản kèm mốc thời gian, xuất ra file phụ đề <span className="font-mono">transcript.srt</span>.
-          Chạy hoàn toàn trên máy bạn, không gửi file đi đâu.
+          Nhận diện giọng nói tiếng Trung, tách theo cảnh trong video rồi dịch cả khối lời thoại sang tiếng Việt (đúng ngữ cảnh hơn dịch từng câu rời).
+          File video/âm thanh không bị gửi đi — chỉ gửi lời thoại khi bật dịch.
         </p>
       </div>
 
@@ -105,6 +136,22 @@ export function TranscribePage({ api }: { api: TranscribeApi }) {
         </div>
       </Card>
 
+      <Card title="3. Dịch sang tiếng Việt"
+        hint="App nhận diện cắt cảnh trên máy, rồi dịch cả đoạn hội thoại của từng cảnh (không dịch từng câu tách rời).">
+        <label className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors
+          ${translateToVi ? "border-accent/60 bg-accent/5" : "border-[#252a38] hover:border-[#3a4258]"}
+          ${running ? "opacity-60 pointer-events-none" : ""}`}>
+          <input type="checkbox" className="mt-1 accent-[#3b82f6]"
+            checked={translateToVi} onChange={e => setTranslateToVi(e.target.checked)} disabled={running} />
+          <span className="min-w-0">
+            <span className="block text-[13px] text-text font-medium">Dịch phụ đề theo cảnh sang tiếng Việt</span>
+            <span className="block text-[11px] text-subtle mt-0.5">
+              Cần mạng lúc dịch. File gốc ở lại máy; chỉ gửi câu thoại đã nhận diện tới máy chủ dịch.
+            </span>
+          </span>
+        </label>
+      </Card>
+
       <div className="flex flex-wrap items-center gap-3">
         {!running ? (
           <button type="button" onClick={start} disabled={!file || !status}
@@ -130,8 +177,8 @@ export function TranscribePage({ api }: { api: TranscribeApi }) {
             <span className="text-subtle break-words min-w-0">{progress.message}</span>
             <span className="text-muted tabular-nums shrink-0 ml-3">{Math.round(progress.percent)}%</span>
           </div>
-          {progress.stage === "recognize" && (
-            <p className="text-[11px] text-muted mt-2">File dài có thể mất vài phút. Bạn có thể chuyển sang tab khác, việc nhận diện vẫn tiếp tục.</p>
+          {(progress.stage === "recognize" || progress.stage === "scenes" || progress.stage === "translate") && (
+            <p className="text-[11px] text-muted mt-2">File dài có thể mất vài phút. Bạn có thể chuyển sang tab khác, việc xử lý vẫn tiếp tục.</p>
           )}
         </Card>
       )}
@@ -143,21 +190,28 @@ export function TranscribePage({ api }: { api: TranscribeApi }) {
       )}
 
       {phase === "done" && (
-        <Card title={`Kết quả · ${segments.length} đoạn`}>
+        <Card title={`Kết quả · ${segments.length} đoạn${translated ? " · đã dịch tiếng Việt" : ""}`}>
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <button type="button" onClick={saveSrt} className={`${btn} bg-accent/15 hover:bg-accent/25 text-accent font-medium`}>
-              Lưu transcript.srt
+              {translated ? "Lưu transcript-vi.srt" : "Lưu transcript.srt"}
             </button>
             <button type="button" onClick={copyText} className={`${btn} bg-[#252a38] hover:bg-[#2f3547] text-subtle hover:text-text`}>
               Sao chép văn bản
             </button>
             {notice && <span className={`text-[12px] ${noticeIsError ? "text-red-400" : "text-emerald-400"}`}>{notice}</span>}
           </div>
+          {warning && (
+            <p className="text-[12px] text-amber-400 mb-2">{warning} Phụ đề bên dưới vẫn là lời gốc.</p>
+          )}
           <div className="max-h-[360px] overflow-y-auto rounded-lg bg-[#0f1117] border border-[#252a38] px-3">
-            {segments.map((s, i) => <SegmentRow key={i} seg={s} />)}
+            {segments.some(s => s.sceneIndex != null)
+              ? groupScenes(segments).map(g => <SceneBlock key={g.index} index={g.index} segs={g.segs} />)
+              : segments.map((s, i) => <SegmentRow key={i} seg={s} />)}
           </div>
           <p className="text-[11px] text-muted mt-2">
-            Kết quả do AI nhận diện nên có thể sai ở tên riêng, từ hiếm hoặc đoạn nhiều tạp âm — hãy đọc lại trước khi dùng.
+            {translated
+              ? "Dịch theo cả cảnh nên câu sẽ tự nhiên hơn, nhưng tên riêng và tiếng lóng vẫn có thể sai — hãy đọc lại trước khi dùng."
+              : "Kết quả do AI nhận diện nên có thể sai ở tên riêng, từ hiếm hoặc đoạn nhiều tạp âm — hãy đọc lại trước khi dùng."}
           </p>
         </Card>
       )}

@@ -77,13 +77,32 @@ export type CookieBrowser = "none" | "firefox" | "edge" | "chrome" | "brave";
 // ─── Trích xuất văn bản ──────────────────────────────────────────────────────
 
 export type WhisperModelId = "base" | "small" | "turbo";
-export type TranscribeStage = "tools" | "model" | "audio" | "recognize";
+export type TranscribeStage = "tools" | "model" | "audio" | "recognize" | "scenes" | "translate";
 
-export interface TranscribeSegment { startMs: number; endMs: number; text: string; }
+export interface TranscribeSegment {
+  startMs: number;
+  endMs: number;
+  text: string;
+  /** Lời gốc (tiếng Trung) khi `text` đã được dịch. */
+  sourceText?: string;
+  /** Cảnh hình / đoạn hội thoại (0-based). */
+  sceneIndex?: number;
+}
 
-export interface TranscribeRequest { id: string; fileToken: string; model: WhisperModelId; }
+export interface TranscribeRequest {
+  id: string;
+  fileToken: string;
+  model: WhisperModelId;
+  /** Dịch phụ đề sang tiếng Việt theo từng cảnh (cần mạng; chỉ gửi lời thoại). */
+  translateToVi?: boolean;
+}
 export interface TranscribeProgress { id: string; stage: TranscribeStage; percent: number; message: string; }
-export interface TranscribeDone     { id: string; segments: TranscribeSegment[]; }
+export interface TranscribeDone {
+  id: string;
+  segments: TranscribeSegment[];
+  translated?: boolean;
+  warning?: string;
+}
 export interface TranscribeError    { id: string; message: string; }
 
 export interface TranscribeModelInfo {
