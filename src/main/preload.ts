@@ -18,6 +18,9 @@ const IPC = {
   TRANSCRIBE_CANCEL:   "transcribe:cancel",
   TRANSCRIBE_SAVE:     "transcribe:save",
   TRANSCRIBE_COPY:     "transcribe:copy",
+  LLM_GET_SETTINGS:    "llm:getSettings",
+  LLM_SAVE_SETTINGS:   "llm:saveSettings",
+  LLM_TEST:            "llm:test",
   TRANSCRIBE_PROGRESS: "transcribe:progress",
   TRANSCRIBE_DONE:     "transcribe:done",
   TRANSCRIBE_ERROR:    "transcribe:error",
@@ -75,6 +78,10 @@ contextBridge.exposeInMainWorld("api", {
   cancelTranscribe:  (id: string)        => ipcRenderer.send(IPC.TRANSCRIBE_CANCEL, id),
   saveTranscribeSrt: (id: string)        => ipcRenderer.invoke(IPC.TRANSCRIBE_SAVE, id),
   copyTranscribeText: (id: string)       => ipcRenderer.invoke(IPC.TRANSCRIBE_COPY, id),
+  // Cài đặt AI dịch (API key không bao giờ đi về phía giao diện)
+  getLlmSettings:  ()                => ipcRenderer.invoke(IPC.LLM_GET_SETTINGS),
+  saveLlmSettings: (req: unknown)    => ipcRenderer.invoke(IPC.LLM_SAVE_SETTINGS, req),
+  testLlm:         ()                => ipcRenderer.invoke(IPC.LLM_TEST),
   onTranscribeProgress: (cb: (p: unknown) => void) => {
     const fn = (_: unknown, p: unknown) => cb(p);
     ipcRenderer.on(IPC.TRANSCRIBE_PROGRESS, fn);

@@ -13,6 +13,8 @@ import { buildWhisperArgs, explainWhisperExit } from "./whisper.js";
 import { isValidId } from "./security.js";
 import { attachSceneIndex, batchesForTranslation, parseSceneCutMs, uniqueCuts } from "./scenes.js";
 import { translateZhToVi, type GetJsonFn } from "./translate.js";
+import { translateWithLlm, type LlmRuntime } from "./llm-translate.js";
+import type { HttpDeps } from "./llm.js";
 
 export interface TranscribeEvents {
   progress: (p: TranscribeProgress) => void;
@@ -39,6 +41,10 @@ export interface TranscribeDeps {
   log?(message: string, extra?: unknown): void;
   /** Thay HTTP dịch (test). Mặc định gọi máy chủ dịch công cộng. */
   getJson?: GetJsonFn;
+  /** Cấu hình AI dịch (chỉ dùng khi job.engine = "ai"). */
+  llm?: LlmRuntime;
+  /** Thay HTTP/ngủ chờ của AI (test). */
+  llmHttp?: Pick<HttpDeps, "fetch" | "sleep">;
 }
 
 export interface TranscribeJob {
@@ -46,6 +52,7 @@ export interface TranscribeJob {
   inputPath: string;
   model: WhisperModelId;
   translateToVi?: boolean;
+  engine?: "google" | "ai";
 }
 
 const tail = (s: string, n = 2000) => (s.length > n ? s.slice(-n) : s);
@@ -184,6 +191,7 @@ export function startTranscription(job: TranscribeJob, deps: TranscribeDeps): { 
 
       let translated = false;
       let warning: string | undefined;
+      let info: string | undefined;
 
       if (job.translateToVi) {
         progress("scenes", 0, "Đang nhận diện cảnh trong video...", true);
@@ -198,33 +206,62 @@ export function startTranscription(job: TranscribeJob, deps: TranscribeDeps): { 
           ? `Đã tách ${sceneCount} cảnh hình`
           : `Không thấy cắt cảnh — gom ${sceneCount} đoạn hội thoại`, true);
 
-        progress("translate", 0, "Đang dịch sang tiếng Việt theo cảnh...", true);
-        const batches = batchesForTranslation(segments);
-        const total = Math.max(1, batches.length);
-        let doneBatches = 0;
-        try {
-          for (const batch of batches) {
-            if (cancelled) return;
-            const vi = await translateZhToVi(batch.map(s => s.text), ac.signal, deps.getJson);
-            for (let i = 0; i < batch.length; i++) {
-              if (!batch[i].sourceText) batch[i].sourceText = batch[i].text;
-              if (vi[i]) batch[i].text = vi[i];
-            }
-            doneBatches++;
-            progress("translate", (doneBatches / total) * 100, `Đang dịch cảnh ${doneBatches}/${total} sang tiếng Việt...`);
+        // Dịch bằng AI: đọc cả kịch bản → dịch từng nhóm cảnh có hồ sơ nhân vật/xưng hô → soát lại.
+        // Nếu AI lỗi (key sai, mất mạng...) tự chuyển sang Google Dịch để không mất kết quả.
+        let aiFailure = "";
+        if (job.engine === "ai" && deps.llm) {
+          progress("translate", 0, "AI đang đọc toàn bộ kịch bản...", true);
+          try {
+            const r = await translateWithLlm(segments, deps.llm, { ...deps.llmHttp, signal: ac.signal, log: deps.log },
+              (pct, msg) => progress("translate", pct, msg));
+            segments.forEach((s, i) => { s.sourceText = r.fixedZh[i]; s.text = r.vi[i] || s.text; });
+            translated = true;
+            const st = r.stats;
+            info = `Dịch bằng AI (${deps.llm.cfg.model}): ${st.characters} nhân vật`
+              + (st.corrections ? `, sửa ${st.corrections} lỗi nhận diện giọng nói` : "")
+              + (st.reviewFixes ? `, soát lại chỉnh ${st.reviewFixes} dòng` : "")
+              + (st.failedLines ? `, ${st.failedLines} dòng AI không dịch được (giữ tiếng Trung)` : "")
+              + ` · ${(st.inTokens + st.outTokens).toLocaleString("vi-VN")} token.`
+              + (st.analysisOk ? "" : " Không phân tích được kịch bản nên chất lượng có thể thấp hơn.");
+            progress("translate", 100, "Đã dịch bằng AI", true);
+          } catch (err) {
+            if (cancelled || ac.signal.aborted) return;
+            const e = err as Error;
+            aiFailure = e instanceof UserFacingError ? e.message : `Lỗi AI: ${e.message}`;
+            deps.log?.("Dịch bằng AI thất bại — chuyển sang Google Dịch", { err: e.message });
           }
-          translated = true;
-          progress("translate", 100, "Đã dịch sang tiếng Việt", true);
-        } catch (err) {
-          if (cancelled || ac.signal.aborted) return;
-          const e = err as Error;
-          warning = e instanceof UserFacingError ? e.message : `Không dịch được sang tiếng Việt: ${e.message}`;
-          deps.log?.("Dịch phụ đề thất bại — giữ lời gốc", { err: e.message });
+        }
+
+        if (!translated) {
+          progress("translate", 0, aiFailure ? "AI lỗi — chuyển sang Google Dịch..." : "Đang dịch sang tiếng Việt theo cảnh...", true);
+          const batches = batchesForTranslation(segments);
+          const total = Math.max(1, batches.length);
+          let doneBatches = 0;
+          try {
+            for (const batch of batches) {
+              if (cancelled) return;
+              const vi = await translateZhToVi(batch.map(s => s.text), ac.signal, deps.getJson);
+              for (let i = 0; i < batch.length; i++) {
+                if (!batch[i].sourceText) batch[i].sourceText = batch[i].text;
+                if (vi[i]) batch[i].text = vi[i];
+              }
+              doneBatches++;
+              progress("translate", (doneBatches / total) * 100, `Đang dịch cảnh ${doneBatches}/${total} sang tiếng Việt...`);
+            }
+            translated = true;
+            if (aiFailure) warning = `AI không dịch được (${aiFailure}) nên đã dùng Google Dịch thay thế.`;
+            progress("translate", 100, "Đã dịch sang tiếng Việt", true);
+          } catch (err) {
+            if (cancelled || ac.signal.aborted) return;
+            const e = err as Error;
+            warning = (aiFailure ? `AI lỗi: ${aiFailure} · ` : "") + (e instanceof UserFacingError ? e.message : `Không dịch được sang tiếng Việt: ${e.message}`);
+            deps.log?.("Dịch phụ đề thất bại — giữ lời gốc", { err: e.message });
+          }
         }
       }
 
       stopPending();
-      emitter.emit("done", { id: job.id, segments, translated, warning });
+      emitter.emit("done", { id: job.id, segments, translated, warning, info });
     } catch (err) {
       stopPending();
       if (cancelled) return;

@@ -1,4 +1,4 @@
-import type { TranscribeRequest, TranscribeProgress, TranscribeDone, TranscribeError, TranscribeStatus, TranscribePickResult, TranscribeActionResult, DownloadRequest, DownloadProgress, DownloadComplete, DownloadError, CookiesStatus, CookiesResult, CookieBrowser, CookieSite } from "../../shared/ipc-types";
+import type { LlmSettingsView, LlmSettingsSave, LlmResult, TranscribeRequest, TranscribeProgress, TranscribeDone, TranscribeError, TranscribeStatus, TranscribePickResult, TranscribeActionResult, DownloadRequest, DownloadProgress, DownloadComplete, DownloadError, CookiesStatus, CookiesResult, CookieBrowser, CookieSite } from "../../shared/ipc-types";
 
 declare global {
   interface Window {
@@ -20,6 +20,9 @@ declare global {
       pickTranscribeFile:  () => Promise<TranscribePickResult>;
       getTranscribeStatus: () => Promise<TranscribeStatus | null>;
       startTranscribe:     (req: TranscribeRequest) => Promise<TranscribeActionResult>;
+      getLlmSettings:      () => Promise<LlmSettingsView | null>;
+      saveLlmSettings:     (req: LlmSettingsSave) => Promise<LlmResult>;
+      testLlm:             () => Promise<LlmResult>;
       cancelTranscribe:    (id: string) => void;
       saveTranscribeSrt:   (id: string) => Promise<TranscribeActionResult>;
       copyTranscribeText:  (id: string) => Promise<TranscribeActionResult>;

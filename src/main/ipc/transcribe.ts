@@ -17,6 +17,8 @@ import { formatSrt, toPlainText } from "../core/srt.js";
 import { isValidId } from "../core/security.js";
 import { logger } from "../core/logger.js";
 import { isTrustedSender } from "./guard.js";
+import { getLlmRuntime } from "./llm.js";
+import type { LlmRuntime } from "../core/llm-translate.js";
 
 const MAX_TOKENS = 20;
 const MAX_RESULTS = 3;
@@ -91,10 +93,17 @@ export function registerTranscribeHandlers(win: BrowserWindow) {
     const id = r.id;
     const model = r.model;
     const translateToVi = r.translateToVi === true;
-    logger.info("ipc:transcribe", "Bắt đầu trích xuất văn bản", { model, translateToVi });
+    const translateEngine = r.translateEngine === "ai" ? "ai" : "google";
+    let llm: LlmRuntime | undefined;
+    if (translateToVi && translateEngine === "ai") {            // kiểm tra TRƯỚC khi chạy nhận diện lâu
+      const rt = getLlmRuntime();
+      if (!rt.ok) return { ok: false, error: rt.error };
+      llm = rt.rt;
+    }
+    logger.info("ipc:transcribe", "Bắt đầu trích xuất văn bản", { model, translateToVi, translateEngine });
 
     const installOpts = (signal: AbortSignal, onProgress: (p: number, m: string) => void) => ({ signal, onProgress });
-    const job = startTranscription({ id, inputPath: file.path, model, translateToVi }, {
+    const job = startTranscription({ id, inputPath: file.path, model, translateToVi, engine: translateEngine }, {
       baseDir: baseDir(),
       threads: pickThreads(os.cpus().length),
       ffmpeg: findFfmpeg,
@@ -103,6 +112,7 @@ export function registerTranscribeHandlers(win: BrowserWindow) {
         await ensureModel(baseDir(), m, installOpts(signal, onProgress));
         return modelRelPath(m);
       },
+      llm,
       log: (message, extra) => logger.info("transcribe", message, extra),
     });
     active = { id, cancel: job.cancel };

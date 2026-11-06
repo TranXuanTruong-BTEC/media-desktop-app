@@ -33,6 +33,10 @@ export const IPC = {
   TRANSCRIBE_PROGRESS: "transcribe:progress",
   TRANSCRIBE_DONE:     "transcribe:done",
   TRANSCRIBE_ERROR:    "transcribe:error",
+  // Cài đặt AI dịch (Claude / OpenAI / Gemini...)
+  LLM_GET_SETTINGS:    "llm:getSettings",
+  LLM_SAVE_SETTINGS:   "llm:saveSettings",
+  LLM_TEST:            "llm:test",
 } as const;
 
 export type VideoQuality = "bestvideo+bestaudio" | "1080p" | "720p" | "480p" | "360p" | "audio_mp3" | "audio_m4a";
@@ -77,6 +81,7 @@ export type CookieBrowser = "none" | "firefox" | "edge" | "chrome" | "brave";
 // ─── Trích xuất văn bản ──────────────────────────────────────────────────────
 
 export type WhisperModelId = "base" | "small" | "turbo";
+export type TranslateEngine = "google" | "ai";
 export type TranscribeStage = "tools" | "model" | "audio" | "recognize" | "scenes" | "translate";
 
 export interface TranscribeSegment {
@@ -95,6 +100,8 @@ export interface TranscribeRequest {
   model: WhisperModelId;
   /** Dịch phụ đề sang tiếng Việt theo từng cảnh (cần mạng; chỉ gửi lời thoại). */
   translateToVi?: boolean;
+  /** "google" = Google Dịch (miễn phí, từng khối); "ai" = mô hình AI đọc cả kịch bản (hiểu ngữ cảnh, cần API key). */
+  translateEngine?: TranslateEngine;
 }
 export interface TranscribeProgress { id: string; stage: TranscribeStage; percent: number; message: string; }
 export interface TranscribeDone {
@@ -102,6 +109,8 @@ export interface TranscribeDone {
   segments: TranscribeSegment[];
   translated?: boolean;
   warning?: string;
+  /** Thông tin thêm sau khi dịch bằng AI (số nhân vật, số lỗi nhận diện đã sửa...). */
+  info?: string;
 }
 export interface TranscribeError    { id: string; message: string; }
 
@@ -146,3 +155,19 @@ export interface DownloadRetrying {
   reason: string;    
   delayMs: number;   
 }
+
+// ─── Cài đặt AI dịch ─────────────────────────────────────────────────────────
+
+/** "anthropic" = Claude; "openai" = mọi API tương thích OpenAI (OpenAI, Gemini, Ollama...). */
+export type LlmProvider = "anthropic" | "openai";
+
+export interface LlmSettings {
+  provider: LlmProvider;
+  model: string;
+  baseUrl: string;      // rỗng = địa chỉ mặc định của nhà cung cấp
+  review: boolean;      // soát lại toàn bộ bản dịch bằng một lượt AI thứ hai (chậm hơn, chất lượng hơn)
+}
+/** Giao diện không bao giờ nhận lại API key — chỉ biết đã có key hay chưa. */
+export interface LlmSettingsView extends LlmSettings { hasKey: boolean; encryptionAvailable: boolean; }
+export interface LlmSettingsSave extends Partial<LlmSettings> { apiKey?: string; clearKey?: boolean; }
+export interface LlmResult { ok: boolean; error?: string; message?: string; settings?: LlmSettingsView; }

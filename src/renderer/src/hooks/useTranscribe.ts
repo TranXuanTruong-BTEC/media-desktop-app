@@ -2,8 +2,13 @@
 // Trạng thái của tính năng "Trích xuất văn bản". Đặt ở App để vẫn giữ nguyên khi người dùng chuyển sang tab khác.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
-  PickedFile, TranscribeProgress, TranscribeSegment, TranscribeStatus, WhisperModelId,
+  PickedFile, TranscribeProgress, TranscribeSegment, TranscribeStatus, TranslateEngine, WhisperModelId,
 } from "../../../shared/ipc-types";
+
+const ENGINE_KEY = "mediaget.translateEngine";
+function loadEngine(): TranslateEngine {
+  try { return localStorage.getItem(ENGINE_KEY) === "ai" ? "ai" : "google"; } catch { return "google"; }
+}
 
 export type TranscribePhase = "idle" | "running" | "done" | "error";
 
@@ -17,6 +22,8 @@ export interface TranscribeState {
   translated: boolean;
   warning: string | null;
   translateToVi: boolean;
+  translateEngine: TranslateEngine;
+  info: string | null;          // thông tin sau khi dịch bằng AI (số nhân vật, lỗi nhận diện đã sửa...)
   error: string | null;
   notice: string | null;      // thông báo nhỏ (đã lưu / đã sao chép...)
   noticeIsError: boolean;
@@ -30,7 +37,7 @@ function uid() {
 export function useTranscribe() {
   const [state, setState] = useState<TranscribeState>({
     file: null, model: "small", status: null, phase: "idle", progress: null,
-    segments: [], translated: false, warning: null, translateToVi: true,
+    segments: [], translated: false, warning: null, info: null, translateToVi: true, translateEngine: loadEngine(),
     error: null, notice: null, noticeIsError: false,
   });
   const jobId = useRef<string | null>(null);
@@ -60,7 +67,7 @@ export function useTranscribe() {
       if (d.id !== jobId.current) return;
       setState(s => ({
         ...s, phase: "done", segments: d.segments, progress: null, error: null,
-        translated: d.translated === true, warning: d.warning ?? null,
+        translated: d.translated === true, warning: d.warning ?? null, info: d.info ?? null,
       }));
       void refreshStatus();
     });
@@ -80,12 +87,16 @@ export function useTranscribe() {
     jobId.current = null;
     setState(s => ({
       ...s, file: r.file!, phase: "idle", segments: [], error: null, progress: null,
-      translated: false, warning: null,
+      translated: false, warning: null, info: null,
     }));
   }, [state.phase, showNotice]);
 
   const setModel = useCallback((model: WhisperModelId) => patch({ model }), [patch]);
   const setTranslateToVi = useCallback((translateToVi: boolean) => patch({ translateToVi }), [patch]);
+  const setTranslateEngine = useCallback((translateEngine: TranslateEngine) => {
+    try { localStorage.setItem(ENGINE_KEY, translateEngine); } catch { /* ignore */ }
+    patch({ translateEngine });
+  }, [patch]);
 
   const start = useCallback(async () => {
     if (!state.file || state.phase === "running") return;
@@ -93,17 +104,17 @@ export function useTranscribe() {
     jobId.current = id;
     setState(s => ({
       ...s, phase: "running", segments: [], error: null, notice: null,
-      translated: false, warning: null,
+      translated: false, warning: null, info: null,
       progress: { id, stage: "tools", percent: 0, message: "Đang chuẩn bị..." },
     }));
     const r = await window.api.startTranscribe({
-      id, fileToken: state.file.token, model: state.model, translateToVi: state.translateToVi,
+      id, fileToken: state.file.token, model: state.model, translateToVi: state.translateToVi, translateEngine: state.translateEngine,
     });
     if (!r.ok) {
       jobId.current = null;
       setState(s => ({ ...s, phase: "error", error: r.error ?? "Không bắt đầu được.", progress: null }));
     }
-  }, [state.file, state.model, state.phase, state.translateToVi]);
+  }, [state.file, state.model, state.phase, state.translateToVi, state.translateEngine]);
 
   const cancel = useCallback(() => {
     if (jobId.current) window.api.cancelTranscribe(jobId.current);
@@ -127,7 +138,7 @@ export function useTranscribe() {
     else showNotice(r.error ?? "Không sao chép được.", true);
   }, [showNotice]);
 
-  return { state, pickFile, setModel, setTranslateToVi, start, cancel, saveSrt, copyText };
+  return { state, pickFile, setModel, setTranslateToVi, setTranslateEngine, start, cancel, saveSrt, copyText };
 }
 
 export type TranscribeApi = ReturnType<typeof useTranscribe>;

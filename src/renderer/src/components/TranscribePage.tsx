@@ -2,6 +2,8 @@
 import React from "react";
 import type { TranscribeApi } from "../hooks/useTranscribe";
 import type { TranscribeSegment } from "../../../shared/ipc-types";
+import { useLlmSettings } from "../hooks/useLlmSettings";
+import { LlmSettingsCard } from "./LlmSettingsCard";
 
 function Card({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -77,8 +79,9 @@ function groupScenes(segments: TranscribeSegment[]): { index: number; segs: Tran
 }
 
 export function TranscribePage({ api }: { api: TranscribeApi }) {
-  const { state, pickFile, setModel, setTranslateToVi, start, cancel, saveSrt, copyText } = api;
-  const { file, model, status, phase, progress, segments, translated, warning, translateToVi, error, notice, noticeIsError } = state;
+  const { state, pickFile, setModel, setTranslateToVi, setTranslateEngine, start, cancel, saveSrt, copyText } = api;
+  const { file, model, status, phase, progress, segments, translated, warning, info, translateToVi, translateEngine, error, notice, noticeIsError } = state;
+  const llm = useLlmSettings();
   const running = phase === "running";
   const selected = status?.models.find(m => m.id === model);
   const needsDownload = !!status && (!status.toolsInstalled || !selected?.installed);
@@ -150,6 +153,31 @@ export function TranscribePage({ api }: { api: TranscribeApi }) {
             </span>
           </span>
         </label>
+
+        {translateToVi && (
+          <div className={`mt-3 space-y-2 ${running ? "opacity-60 pointer-events-none" : ""}`}>
+            <p className="text-[11px] text-subtle">Bộ dịch</p>
+            <label className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors
+              ${translateEngine === "ai" ? "border-accent/60 bg-accent/5" : "border-[#252a38] hover:border-[#3a4258]"}`}>
+              <input type="radio" name="translate-engine" className="mt-1 accent-[#3b82f6]" checked={translateEngine === "ai"} onChange={() => setTranslateEngine("ai")} />
+              <span className="min-w-0">
+                <span className="block text-[13px] text-text font-medium">AI hiểu ngữ cảnh <span className="text-emerald-400 text-[11px] font-normal">· khuyên dùng · cần API key</span></span>
+                <span className="block text-[11px] text-subtle mt-0.5">
+                  AI đọc cả kịch bản trước: nhận ra nhân vật và biệt danh, chọn đúng cách xưng hô (tôi/anh/em/cô...), sửa lỗi nhận diện giọng nói (đồng âm, nhầm tên), rồi dịch từng cảnh và soát lại — giống cách Gemini dịch cả file.
+                </span>
+              </span>
+            </label>
+            <label className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors
+              ${translateEngine === "google" ? "border-accent/60 bg-accent/5" : "border-[#252a38] hover:border-[#3a4258]"}`}>
+              <input type="radio" name="translate-engine" className="mt-1 accent-[#3b82f6]" checked={translateEngine === "google"} onChange={() => setTranslateEngine("google")} />
+              <span className="min-w-0">
+                <span className="block text-[13px] text-text font-medium">Google Dịch <span className="text-muted text-[11px] font-normal">· miễn phí, không cần key</span></span>
+                <span className="block text-[11px] text-subtle mt-0.5">Dịch máy từng khối, nhanh nhưng không biết nhân vật hay cách xưng hô nên dễ dịch sai tên và đại từ.</span>
+              </span>
+            </label>
+            {translateEngine === "ai" && <LlmSettingsCard llm={llm} disabled={running} />}
+          </div>
+        )}
       </Card>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -200,8 +228,9 @@ export function TranscribePage({ api }: { api: TranscribeApi }) {
             </button>
             {notice && <span className={`text-[12px] ${noticeIsError ? "text-red-400" : "text-emerald-400"}`}>{notice}</span>}
           </div>
+          {info && <p className="text-[12px] text-emerald-400 mb-2">{info}</p>}
           {warning && (
-            <p className="text-[12px] text-amber-400 mb-2">{warning} Phụ đề bên dưới vẫn là lời gốc.</p>
+            <p className="text-[12px] text-amber-400 mb-2">{warning}{translated ? "" : " Phụ đề bên dưới vẫn là lời gốc."}</p>
           )}
           <div className="max-h-[360px] overflow-y-auto rounded-lg bg-[#0f1117] border border-[#252a38] px-3">
             {segments.some(s => s.sceneIndex != null)

@@ -1,6 +1,6 @@
 {
   "name": "media-desktop-app",
-  "version": "2.6.9",
+  "version": "2.7.0",
   "description": "Tải video/audio từ YouTube, TikTok, Facebook và 1000+ trang",
   "author": "TranXuanTruong-BTEC",
   "private": true,
@@ -16,7 +16,8 @@
     "fetch:ffmpeg": "node scripts/fetch-ffmpeg.js",
     "predist": "node scripts/fetch-ffmpeg.js --required",
     "write:latest-yml": "node scripts/write-latest-yml.js",
-    "test:security": "npm run build:main && node scripts/security-selftest.js"
+    "test:security": "npm run build:main && node scripts/security-selftest.js",
+    "test:llm": "npm run build:main && node scripts/llm-selftest.js"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
