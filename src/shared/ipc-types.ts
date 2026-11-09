@@ -37,6 +37,23 @@ export const IPC = {
   LLM_GET_SETTINGS:    "llm:getSettings",
   LLM_SAVE_SETTINGS:   "llm:saveSettings",
   LLM_TEST:            "llm:test",
+  // Tách nền ảnh
+  BG_INFO:             "bg:info",
+  BG_PICK:             "bg:pick",
+  BG_ADD_DROPPED:      "bg:addDropped",
+  BG_DOWNLOAD_MODEL:   "bg:downloadModel",
+  BG_CANCEL_DOWNLOAD:  "bg:cancelDownload",
+  BG_MODEL_PROGRESS:   "bg:modelProgress",
+  BG_START:            "bg:start",
+  BG_CANCEL:           "bg:cancel",
+  BG_PROGRESS:         "bg:progress",
+  BG_ITEM_DONE:        "bg:itemDone",
+  BG_ITEM_ERROR:       "bg:itemError",
+  BG_DONE:             "bg:done",
+  BG_SAVE:             "bg:save",
+  BG_SAVE_ALL:         "bg:saveAll",
+  BG_COPY:             "bg:copy",
+  BG_CLEAR:            "bg:clear",
 } as const;
 
 export type VideoQuality = "bestvideo+bestaudio" | "1080p" | "720p" | "480p" | "360p" | "audio_mp3" | "audio_m4a";
@@ -171,3 +188,20 @@ export interface LlmSettings {
 export interface LlmSettingsView extends LlmSettings { hasKey: boolean; encryptionAvailable: boolean; }
 export interface LlmSettingsSave extends Partial<LlmSettings> { apiKey?: string; clearKey?: boolean; }
 export interface LlmResult { ok: boolean; error?: string; message?: string; settings?: LlmSettingsView; }
+
+// ─── Tách nền ảnh (AI chạy trên máy: ONNX) ───────────────────────────────────
+
+export type BgModelId = "fast" | "general" | "portrait";
+export interface BgModelInfo { id: BgModelId; label: string; desc: string; sizeMb: number; installed: boolean; }
+export interface BgInfo { ffmpegFound: boolean; runtimeOk: boolean; models: BgModelInfo[]; }
+export interface BgImage { token: string; name: string; sizeBytes: number; thumb: string; }   // thumb: data URL PNG nhỏ
+export interface BgPickResult { ok: boolean; canceled?: boolean; error?: string; images?: BgImage[]; skipped?: number; }
+/** Nền của kết quả: trong suốt, một màu đặc (#rrggbb) hoặc chỉ lấy mặt nạ đen/trắng. */
+export type BgBackground = { type: "transparent" } | { type: "color"; color: string } | { type: "mask" };
+export interface BgStartRequest { id: string; tokens: string[]; model: BgModelId; background: BgBackground; refine: boolean; }
+export interface BgModelProgress { id: BgModelId; percent: number; message: string; }
+export interface BgProgress { id: string; index: number; total: number; name: string; percent: number; message: string; }
+export interface BgItemDone { id: string; index: number; token: string; name: string; width: number; height: number; ms: number; preview: string; hasAlpha: boolean; }
+export interface BgItemError { id: string; index: number; token: string; name: string; message: string; }
+export interface BgDone { id: string; ok: number; failed: number; cancelled: boolean; }
+export interface BgActionResult { ok: boolean; canceled?: boolean; error?: string; path?: string; saved?: number; }

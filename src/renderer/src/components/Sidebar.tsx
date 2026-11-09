@@ -4,6 +4,7 @@ export type NavId =
   | "download"
   | "history"
   | "transcribe"
+  | "removebg"
   | "trim"
   | "compress"
   | "audio"
@@ -48,6 +49,16 @@ function IconHistory() {
     <svg viewBox="0 0 24 24" className={ICON} {...S}>
       <circle cx="12" cy="12" r="8.5" />
       <path d="M12 7v5.2l3.4 2" />
+    </svg>
+  );
+}
+
+function IconRemoveBg() {
+  return (
+    <svg viewBox="0 0 24 24" className={ICON} {...S}>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="2.5" strokeDasharray="2.5 2.5" />
+      <circle cx="12" cy="9.5" r="2.6" />
+      <path d="M6.8 18c.6-2.7 2.7-4.3 5.2-4.3s4.6 1.6 5.2 4.3" />
     </svg>
   );
 }
@@ -124,6 +135,7 @@ export function Sidebar({
     { id: "download", label: "Tải xuống",  badge: activeDownloads, icon: <IconDownload /> },
     { id: "history",  label: "Lịch sử",    badge: historyCount,    icon: <IconHistory /> },
     { id: "transcribe", label: "Trích văn bản", icon: <IconTranscribe /> },
+    { id: "removebg", label: "Tách nền", icon: <IconRemoveBg /> },
     { id: "trim",     label: "Cắt/Ghép",   icon: <IconTrim /> },
     { id: "compress", label: "Nén file",   icon: <IconCompress /> },
     { id: "audio",    label: "Tách nhạc",  icon: <IconAudio /> },

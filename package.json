@@ -1,6 +1,6 @@
 {
   "name": "media-desktop-app",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "description": "Tải video/audio từ YouTube, TikTok, Facebook và 1000+ trang",
   "author": "TranXuanTruong-BTEC",
   "private": true,
@@ -17,10 +17,12 @@
     "predist": "node scripts/fetch-ffmpeg.js --required",
     "write:latest-yml": "node scripts/write-latest-yml.js",
     "test:security": "npm run build:main && node scripts/security-selftest.js",
-    "test:llm": "npm run build:main && node scripts/llm-selftest.js"
+    "test:llm": "npm run build:main && node scripts/llm-selftest.js",
+    "test:bg": "npm run build:main && node scripts/bg-selftest.js"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
+    "onnxruntime-node": "1.31.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
@@ -51,7 +53,13 @@
       "dist-electron/**/*",
       "dist/**/*",
       "package.json",
-      "build/icon.ico"
+      "build/icon.ico",
+      "!**/node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
+      "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/**",
+      "!**/node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"
+    ],
+    "asarUnpack": [
+      "**/node_modules/onnxruntime-node/bin/**"
     ],
     "extraResources": [
       {

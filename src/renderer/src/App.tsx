@@ -4,6 +4,8 @@ import { useDownload }         from "./hooks/useDownload";
 import { useUpdater }          from "./hooks/useUpdater";
 import { useYtdlpUpdater }     from "./hooks/useYtdlpUpdater";
 import { useTranscribe }       from "./hooks/useTranscribe";
+import { useBgRemove }          from "./hooks/useBgRemove";
+import { BgRemovePage }         from "./components/BgRemovePage";
 import { DownloadForm }        from "./components/DownloadForm";
 import { DownloadItemRow }     from "./components/DownloadItem";
 import { StatusBar }           from "./components/StatusBar";
@@ -46,6 +48,7 @@ export default function App() {
   const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
   const { state: ytdlpState, checkNow, forceUpdate, dismiss: dismissYtdlp } = useYtdlpUpdater();
   const transcribe = useTranscribe();
+  const bgRemove = useBgRemove();
 
   useEffect(() => {
     window.api?.getDefaultDir?.().then(d => { if (d) setOutputDir(d); }).catch(() => {});
@@ -213,6 +216,7 @@ export default function App() {
           {nav === "about" && <AboutPage version={appVersion} />}
 
           {nav === "transcribe" && <TranscribePage api={transcribe} />}
+          {nav === "removebg" && <BgRemovePage api={bgRemove} />}
 
           {(nav === "trim" || nav === "compress" || nav === "audio") && (
             <ComingSoon page={nav} />

@@ -7,6 +7,7 @@ import { registerYtdlpUpdaterHandlers } from "./ipc/ytdlp-update.js";
 import { registerCookiesHandlers }      from "./ipc/cookies.js";
 import { registerTranscribeHandlers, cancelActiveTranscription } from "./ipc/transcribe.js";
 import { registerLlmHandlers } from "./ipc/llm.js";
+import { registerBgRemoveHandlers, cancelActiveBgRemove } from "./ipc/bgremove.js";
 import { logger } from "./core/logger.js";
 import { isTrustedSender, DEV_ORIGIN } from "./ipc/guard.js";
 
@@ -142,6 +143,7 @@ if (!gotSingleLock) {
     registerCookiesHandlers(win);
     registerTranscribeHandlers(win);
     registerLlmHandlers(win);
+    registerBgRemoveHandlers(win);
     registerAppHandlers(win);
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -149,7 +151,7 @@ if (!gotSingleLock) {
   });
 }
 
-app.on("before-quit", () => cancelActiveTranscription());
+app.on("before-quit", () => { cancelActiveTranscription(); cancelActiveBgRemove(); });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

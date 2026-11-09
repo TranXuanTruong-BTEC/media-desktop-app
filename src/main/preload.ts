@@ -1,5 +1,5 @@
 // src/main/preload.ts — standalone, zero cross-folder imports
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const IPC = {
   DOWNLOAD_START:    "download:start",
@@ -21,6 +21,22 @@ const IPC = {
   LLM_GET_SETTINGS:    "llm:getSettings",
   LLM_SAVE_SETTINGS:   "llm:saveSettings",
   LLM_TEST:            "llm:test",
+  BG_INFO:             "bg:info",
+  BG_PICK:             "bg:pick",
+  BG_ADD_DROPPED:      "bg:addDropped",
+  BG_DOWNLOAD_MODEL:   "bg:downloadModel",
+  BG_CANCEL_DOWNLOAD:  "bg:cancelDownload",
+  BG_MODEL_PROGRESS:   "bg:modelProgress",
+  BG_START:            "bg:start",
+  BG_CANCEL:           "bg:cancel",
+  BG_PROGRESS:         "bg:progress",
+  BG_ITEM_DONE:        "bg:itemDone",
+  BG_ITEM_ERROR:       "bg:itemError",
+  BG_DONE:             "bg:done",
+  BG_SAVE:             "bg:save",
+  BG_SAVE_ALL:         "bg:saveAll",
+  BG_COPY:             "bg:copy",
+  BG_CLEAR:            "bg:clear",
   TRANSCRIBE_PROGRESS: "transcribe:progress",
   TRANSCRIBE_DONE:     "transcribe:done",
   TRANSCRIBE_ERROR:    "transcribe:error",
@@ -82,6 +98,24 @@ contextBridge.exposeInMainWorld("api", {
   getLlmSettings:  ()                => ipcRenderer.invoke(IPC.LLM_GET_SETTINGS),
   saveLlmSettings: (req: unknown)    => ipcRenderer.invoke(IPC.LLM_SAVE_SETTINGS, req),
   testLlm:         ()                => ipcRenderer.invoke(IPC.LLM_TEST),
+  // Tách nền ảnh
+  getPathForFile:      (f: File)               => { try { return webUtils.getPathForFile(f); } catch { return ""; } },
+  getBgInfo:           ()                      => ipcRenderer.invoke(IPC.BG_INFO),
+  pickBgImages:        ()                      => ipcRenderer.invoke(IPC.BG_PICK),
+  addDroppedBgImages:  (paths: string[])       => ipcRenderer.invoke(IPC.BG_ADD_DROPPED, paths),
+  downloadBgModel:     (id: string)            => ipcRenderer.invoke(IPC.BG_DOWNLOAD_MODEL, id),
+  cancelBgModelDownload: (id: string)          => ipcRenderer.send(IPC.BG_CANCEL_DOWNLOAD, id),
+  startBg:             (req: unknown)          => ipcRenderer.invoke(IPC.BG_START, req),
+  cancelBg:            (id: string)            => ipcRenderer.send(IPC.BG_CANCEL, id),
+  saveBgImage:         (id: string, token: string) => ipcRenderer.invoke(IPC.BG_SAVE, id, token),
+  saveAllBg:           (id: string)            => ipcRenderer.invoke(IPC.BG_SAVE_ALL, id),
+  copyBgImage:         (id: string, token: string) => ipcRenderer.invoke(IPC.BG_COPY, id, token),
+  clearBg:             ()                      => ipcRenderer.invoke(IPC.BG_CLEAR),
+  onBgModelProgress: (cb: (p: unknown) => void) => { const fn = (_: unknown, p: unknown) => cb(p); ipcRenderer.on(IPC.BG_MODEL_PROGRESS, fn); return () => ipcRenderer.removeListener(IPC.BG_MODEL_PROGRESS, fn); },
+  onBgProgress:      (cb: (p: unknown) => void) => { const fn = (_: unknown, p: unknown) => cb(p); ipcRenderer.on(IPC.BG_PROGRESS, fn);       return () => ipcRenderer.removeListener(IPC.BG_PROGRESS, fn); },
+  onBgItemDone:      (cb: (p: unknown) => void) => { const fn = (_: unknown, p: unknown) => cb(p); ipcRenderer.on(IPC.BG_ITEM_DONE, fn);      return () => ipcRenderer.removeListener(IPC.BG_ITEM_DONE, fn); },
+  onBgItemError:     (cb: (p: unknown) => void) => { const fn = (_: unknown, p: unknown) => cb(p); ipcRenderer.on(IPC.BG_ITEM_ERROR, fn);     return () => ipcRenderer.removeListener(IPC.BG_ITEM_ERROR, fn); },
+  onBgDone:          (cb: (p: unknown) => void) => { const fn = (_: unknown, p: unknown) => cb(p); ipcRenderer.on(IPC.BG_DONE, fn);           return () => ipcRenderer.removeListener(IPC.BG_DONE, fn); },
   onTranscribeProgress: (cb: (p: unknown) => void) => {
     const fn = (_: unknown, p: unknown) => cb(p);
     ipcRenderer.on(IPC.TRANSCRIBE_PROGRESS, fn);
