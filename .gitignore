@@ -1,8 +1,99 @@
+# ==========================================
+# 1. DEPENDENCIES & LIBRARIES
+# ==========================================
 node_modules/
+jspm_packages/
+.pnpm-store/
+
+# ==========================================
+# 2. BUILD & PACKAGING OUTPUTS
+# ==========================================
 dist/
 dist-electron/
+out/
+build/
 release/
-tools/yt-dlp.exe
-tools/node.exe
-tools/ffmpeg.exe
+*.exe
+*.msi
+*.AppImage
+*.dmg
+*.zip
+*.7z
+
+# ==========================================
+# 3. BINARIES & EXTERNAL TOOLS (Trừ thư mục tools nhưng bỏ qua file nặng bên trong)
+# ==========================================
+tools/*.exe
+tools/*.zip
+tools/*.tar.gz
+*.onnx
+
+# ==========================================
+# 4. ENV & SECURITY
+# ==========================================
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+config/local.*
+
+# ==========================================
+# 5. LOGS, COOKIES & USER DATA
+# ==========================================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+cookies.txt
+*.cookie
+user-data/
+*.sqlite
+*.part
+*.tmp
+
+# ==========================================
+# 6. CACHE & TEMP BUILD FILES
+# ==========================================
+.vite/
+.eslintcache
+.stylelintcache
+.cache/
+.electron-builder-cache/
+*.tsbuildinfo
+
+# ==========================================
+# 7. OS & IDE FILES
+# ==========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDEs (VS Code & JetBrains)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
