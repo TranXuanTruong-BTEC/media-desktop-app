@@ -17,6 +17,7 @@ export interface UpdaterState {
   releaseNotes?: string;
   percent?: number;       // 0-100 while downloading
   errorMsg?: string;
+  silent?: boolean;       // sự kiện của lần kiểm tra tự động → không hiện hộp thoại/lỗi
 }
 
 export function useUpdater() {
@@ -24,24 +25,27 @@ export function useUpdater() {
 
   useEffect(() => {
     const off = (window as any).api?.onUpdaterStatus?.((raw: any) => {
+      const silent = raw?.silent === true;
+      // Kiểm tra tự động: không báo "đang kiểm tra / đã mới nhất / lỗi mạng" — chỉ báo khi có bản mới tải xong.
+      if (silent && (raw?.phase === "checking" || raw?.phase === "not-available" || raw?.phase === "error")) return;
       switch (raw?.phase) {
         case "checking":
           setState({ phase: "checking" });
           break;
         case "available":
-          setState({ phase: "available", version: raw.version, releaseNotes: raw.releaseNotes });
+          setState({ phase: "available", version: raw.version, releaseNotes: raw.releaseNotes, silent });
           break;
         case "not-available":
           setState({ phase: "not-available" });
           break;
         case "downloading":
-          setState(prev => ({ ...prev, phase: "downloading", percent: raw.percent ?? 0 }));
+          setState(prev => ({ ...prev, phase: "downloading", percent: raw.percent ?? 0, silent }));
           break;
         case "ready":
-          setState({ phase: "ready", version: raw.version });
+          setState({ phase: "ready", version: raw.version, silent });
           break;
         case "error":
-          setState({ phase: "error", errorMsg: raw.message });
+          setState({ phase: "error", errorMsg: raw.message, silent });
           break;
         default:
           break;

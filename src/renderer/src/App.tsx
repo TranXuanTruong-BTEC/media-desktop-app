@@ -10,7 +10,7 @@ import { DownloadForm }        from "./components/DownloadForm";
 import { DownloadItemRow }     from "./components/DownloadItem";
 import { StatusBar }           from "./components/StatusBar";
 import { Titlebar }            from "./components/Titlebar";
-import { UpdateDialog }        from "./components/UpdateDialog";
+import { UpdateToast }         from "./components/UpdateToast";
 import { YtdlpUpdateBanner }   from "./components/YtdlpUpdateBanner";
 import { Sidebar, NavId }      from "./components/Sidebar";
 import { SettingsPage }        from "./components/SettingsPage";
@@ -45,7 +45,7 @@ export default function App() {
     items, history, addDownload, cancelDownload, retryDownload, removeItem, clearCompleted,
     removeHistory, clearHistory, findDuplicate, selectOutputDir, stats,
   } = useDownload(outputDir);
-  const { state: updaterState, dismiss, downloadNow, installNow } = useUpdater();
+  const { state: updaterState, dismiss, installNow } = useUpdater();
   const { state: ytdlpState, checkNow, forceUpdate, dismiss: dismissYtdlp } = useYtdlpUpdater();
   const transcribe = useTranscribe();
   const bgRemove = useBgRemove();
@@ -53,7 +53,6 @@ export default function App() {
   useEffect(() => {
     window.api?.getDefaultDir?.().then(d => { if (d) setOutputDir(d); }).catch(() => {});
     (window as any).api?.getAppVersion?.().then((v: string) => { if (v) setAppVersion(v); }).catch(() => {});
-    setTimeout(() => { (window as any).api?.checkForUpdate?.(); }, 2000);
   }, []);
 
   function toggleCollapsed() {
@@ -245,12 +244,21 @@ export default function App() {
         onCancel={() => setDialog(null)}
       />
 
-      <UpdateDialog
+      <UpdateToast
         state={updaterState}
-        currentVersion={appVersion}
-        onConfirm={downloadNow}
         onDismiss={dismiss}
-        onInstall={installNow}
+        onInstall={() => {
+          // Đang có tác vụ chạy thì hỏi trước (khởi động lại sẽ dừng chúng).
+          if (stats.active > 0) {
+            setDialog({
+              title: "Cập nhật ngay?",
+              message: `Đang có ${stats.active} tác vụ tải đang chạy. Cập nhật bây giờ sẽ dừng chúng. Nếu chọn "Để sau", bản mới vẫn tự cài khi bạn đóng ứng dụng.`,
+              confirmText: "Cập nhật ngay",
+              cancelText: "Để sau",
+              onConfirm: () => { setDialog(null); void installNow(); },
+            });
+          } else { void installNow(); }
+        }}
       />
     </div>
   );
