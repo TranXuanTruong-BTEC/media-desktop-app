@@ -665,7 +665,8 @@ await atest("transcriber: luồng đầy đủ → các đoạn đã làm sạch
     ]);
     const stages = [...new Set(r.progress.map(p => p.stage))];
     assert.deepStrictEqual(stages, ["tools", "model", "audio", "recognize"]);
-    const rec = r.progress.filter(p => p.stage === "recognize").map(p => p.percent);
+    // Bỏ số lặp liên tiếp: dòng "100%" của whisper và bước "Hoàn tất" đều là 100; máy chậm thì cả hai cùng được phát (vô hại), máy nhanh thì chỉ một.
+    const rec = r.progress.filter(p => p.stage === "recognize").map(p => p.percent).filter((v, i, a) => i === 0 || v !== a[i - 1]);
     assert.deepStrictEqual(rec, [0, 10, 60, 100]);   // 10% đến sát sau 0% → được giữ lại và phát sau khoảng nghỉ, không bị mất
     assert.ok(r.progress.some(p => p.stage === "audio" && p.percent === 50));         // time=5s / Duration=10s
     await tick(100);

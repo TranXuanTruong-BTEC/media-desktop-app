@@ -250,12 +250,12 @@ function ytdlpLabel(state: YtdlpUpdaterState) {
 function appUpdateLabel(state: UpdaterState) {
   switch (state.phase) {
     case "checking":      return "Đang kiểm tra cập nhật...";
-    case "available":     return `Có bản mới: ${state.version}`;
+    case "available":     return `Có bản mới ${state.version} — đang tự tải...`;
     case "not-available": return "Bạn đang dùng bản mới nhất";
     case "downloading":   return `Đang tải bản cập nhật... ${state.percent ?? 0}%`;
-    case "ready":         return `Sẵn sàng cài bản ${state.version}`;
+    case "ready":         return `Đã tải xong bản ${state.version} — sẽ tự cài khi bạn đóng ứng dụng`;
     case "error":         return state.errorMsg || "Không kiểm tra được cập nhật";
-    default:              return "Kiểm tra bản cập nhật ứng dụng";
+    default:              return "Ứng dụng tự động kiểm tra và cập nhật ở chế độ nền";
   }
 }
 
